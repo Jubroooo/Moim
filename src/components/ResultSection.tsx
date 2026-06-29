@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 
 import RestaurantCard, { RestaurantCardGrid } from './RestaurantCard'
 import { RESTAURANTS_PER_REGION } from '../lib/api'
+import { isKakaoShareAvailable, shareVoteLinkToKakao } from '../lib/kakaoShare'
 import { createShareLink } from '../lib/share'
 import { useMidpointStore } from '../store/useMidpointStore'
 import type { MidpointResult, RegionRecommendation } from '../types'
@@ -208,6 +209,8 @@ export default function ResultSection() {
   const [toastVisible, setToastVisible] = useState(false)
   const [toastMessage, setToastMessage] = useState('')
   const [isSharing, setIsSharing] = useState(false)
+  const [isKakaoSharing, setIsKakaoSharing] = useState(false)
+  const kakaoShareEnabled = isKakaoShareAvailable()
 
   useEffect(() => {
     if (result && sectionRef.current) {
@@ -233,6 +236,25 @@ export default function ResultSection() {
       setIsSharing(false)
     }
   }, [result, isSharing, setResult])
+
+  const handleKakaoShare = useCallback(async () => {
+    if (!result || isKakaoSharing) return
+
+    setIsKakaoSharing(true)
+
+    try {
+      const { url, updatedResult } = createShareLink(result)
+      setResult(updatedResult)
+      await shareVoteLinkToKakao(url, updatedResult)
+      setToastMessage('카카오톡 공유 창이 열렸어요!')
+      setToastVisible(true)
+    } catch {
+      setToastMessage('카카오톡 공유에 실패했습니다. 다시 시도해 주세요.')
+      setToastVisible(true)
+    } finally {
+      setIsKakaoSharing(false)
+    }
+  }, [result, isKakaoSharing, setResult])
 
   const handleCloseToast = useCallback(() => setToastVisible(false), [])
 
@@ -287,6 +309,17 @@ export default function ResultSection() {
           >
             🔗 친구들에게 공유하기
           </button>
+
+          {kakaoShareEnabled ? (
+            <button
+              type="button"
+              onClick={handleKakaoShare}
+              disabled={isKakaoSharing}
+              className="w-full rounded-xl border border-[#FEE500]/30 bg-[#FEE500] py-3.5 text-sm font-semibold text-[#191919] transition hover:bg-[#FADA0A] disabled:opacity-60"
+            >
+              💬 카카오톡으로 공유하기
+            </button>
+          ) : null}
 
           <button
             type="button"

@@ -21,10 +21,17 @@ export interface ParticipantLocation {
   coords: Coordinates | null
 }
 
+export interface LocationWeight {
+  location: string
+  count: number
+}
+
 export interface MidpointAnalysis {
   midpoint: Coordinates | null
   midpointRegionName: string | null
   participants: ParticipantLocation[]
+  locationWeights: LocationWeight[]
+  totalPeople: number
   usedKakao: boolean
 }
 
@@ -160,61 +167,96 @@ export async function reverseGeocodeRegionName(
   return parts.join(' ') || region.region_1depth_name || null
 }
 
-export function computeMidpoint(
-  coordinates: Coordinates[],
-): Coordinates | null {
-  if (coordinates.length === 0) return null
+export function groupLocationsByHeadcount(
+  locations: string[],
+): LocationWeight[] {
+  const grouped = new Map<string, LocationWeight>()
 
-  const totals = coordinates.reduce(
-    (acc, coord) => ({
-      longitude: acc.longitude + coord.longitude,
-      latitude: acc.latitude + coord.latitude,
+  for (const rawLocation of locations) {
+    const location = rawLocation.trim()
+    if (!location) continue
+
+    const key = location.toLowerCase()
+    const existing = grouped.get(key)
+
+    if (existing) {
+      existing.count += 1
+    } else {
+      grouped.set(key, { location, count: 1 })
+    }
+  }
+
+  return Array.from(grouped.values())
+}
+
+/** 가중 평균 좌표 = Σ(좌표 × 인원수) / 전체 인원 */
+export function computeWeightedMidpoint(
+  entries: { coords: Coordinates; weight: number }[],
+): Coordinates | null {
+  const totalWeight = entries.reduce((sum, entry) => sum + entry.weight, 0)
+  if (totalWeight === 0) return null
+
+  const totals = entries.reduce(
+    (acc, entry) => ({
+      longitude: acc.longitude + entry.coords.longitude * entry.weight,
+      latitude: acc.latitude + entry.coords.latitude * entry.weight,
     }),
     { longitude: 0, latitude: 0 },
   )
 
   return {
-    longitude: totals.longitude / coordinates.length,
-    latitude: totals.latitude / coordinates.length,
+    longitude: totals.longitude / totalWeight,
+    latitude: totals.latitude / totalWeight,
   }
 }
 
 export async function analyzeParticipantLocations(
   locations: string[],
 ): Promise<MidpointAnalysis> {
-  const apiKey = getKakaoApiKey()
+  const locationWeights = groupLocationsByHeadcount(locations)
+  const totalPeople = locations.filter((location) => location.trim()).length
 
-  if (!apiKey) {
-    return {
-      midpoint: null,
-      midpointRegionName: null,
-      participants: locations.map((location) => ({ location, coords: null })),
-      usedKakao: false,
-    }
+  const emptyAnalysis: MidpointAnalysis = {
+    midpoint: null,
+    midpointRegionName: null,
+    participants: locations.map((location) => ({ location, coords: null })),
+    locationWeights,
+    totalPeople,
+    usedKakao: false,
   }
 
+  const apiKey = getKakaoApiKey()
+  if (!apiKey) return emptyAnalysis
+
   try {
-    const participants = await Promise.all(
-      locations.map(async (location) => ({
-        location,
-        coords: await searchAddressCoordinates(location),
-      })),
+    const coordsByLocation = new Map<string, Coordinates | null>()
+
+    await Promise.all(
+      locationWeights.map(async ({ location }) => {
+        const coords = await searchAddressCoordinates(location)
+        coordsByLocation.set(location.toLowerCase(), coords)
+      }),
     )
 
-    const validCoords = participants
-      .map((participant) => participant.coords)
-      .filter((coords): coords is Coordinates => coords !== null)
+    const participants = locations.map((location) => ({
+      location,
+      coords: coordsByLocation.get(location.trim().toLowerCase()) ?? null,
+    }))
 
-    if (validCoords.length === 0) {
-      return {
-        midpoint: null,
-        midpointRegionName: null,
-        participants,
-        usedKakao: false,
-      }
+    const weightedEntries = locationWeights
+      .map(({ location, count }) => {
+        const coords = coordsByLocation.get(location.toLowerCase())
+        return coords ? { coords, weight: count } : null
+      })
+      .filter((entry): entry is { coords: Coordinates; weight: number } =>
+        entry !== null,
+      )
+
+    if (weightedEntries.length === 0) {
+      return { ...emptyAnalysis, participants }
     }
 
-    const midpoint = computeMidpoint(validCoords)
+    const midpoint = computeWeightedMidpoint(weightedEntries)
     const midpointRegionName = midpoint
       ? await reverseGeocodeRegionName(midpoint)
       : null
@@ -223,15 +265,12 @@ export async function analyzeParticipantLocations(
       midpoint,
       midpointRegionName,
       participants,
+      locationWeights,
+      totalPeople,
       usedKakao: true,
     }
   } catch {
-    return {
-      midpoint: null,
-      midpointRegionName: null,
-      participants: locations.map((location) => ({ location, coords: null })),
-      usedKakao: false,
-    }
+    return emptyAnalysis
   }
 }
 

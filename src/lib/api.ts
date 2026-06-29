@@ -4,6 +4,7 @@ import {
   analyzeParticipantLocations,
   buildFallbackBalances,
   calculateTravelBalances,
+  type MidpointAnalysis,
 } from './kakaoMap'
 import { calculateFairnessScore, normalizeMatchScore } from './scores'
 import type { MidpointResult, RegionRecommendation } from '../types'
@@ -74,26 +75,44 @@ interface ParsedAIResponse {
   matchScore?: number
 }
 
+function formatLocationWeights(analysis: MidpointAnalysis): string {
+  if (analysis.locationWeights.length === 0) {
+    return '정보 없음'
+  }
+
+  return analysis.locationWeights
+    .map(({ location, count }) => `${location} ${count}명`)
+    .join(', ')
+}
+
 function buildPrompt(
   inputs: AIRecommendationInputs,
-  midpointRegionName: string | null,
+  locationAnalysis: MidpointAnalysis,
 ): string {
   const locations = inputs.locations.join(', ')
   const preferFoods =
     inputs.preferFoods.length > 0 ? inputs.preferFoods.join(', ') : '없음'
   const excludeFoods =
     inputs.excludeFoods.length > 0 ? inputs.excludeFoods.join(', ') : '없음'
-  const midpointSection = midpointRegionName
-    ? `카카오 지도 API로 계산한 지리적 중간 지점 근처 지역: ${midpointRegionName}
-1순위 추천 지역은 이 중간 지점을 중심으로 추천해줘.`
-    : `중간 지점 좌표 정보 없음 — 참여자 출발 위치 텍스트를 분석해 지리적 중간 지점 근처를 추천해줘.`
+  const participantDistribution = formatLocationWeights(locationAnalysis)
+  const midpointSection = locationAnalysis.midpointRegionName
+    ? `카카오 지도 API로 계산한 인원 가중 중간 지점 근처: ${locationAnalysis.midpointRegionName}
+가중 평균 공식: (각 위치 좌표 × 해당 위치 인원수) 합산 / 전체 인원 (${locationAnalysis.totalPeople}명)
+참여자 분포: ${participantDistribution}
+예) 강남 3명 + 수원 1명이면 강남 쪽에 더 가까운 지점을 기준으로 추천
+1순위 추천 지역은 이 가중 중간 지점과 다수 참여자 접근성을 우선 고려해줘.`
+    : `중간 지점 좌표 정보 없음 — 아래 참여자 분포(${participantDistribution})를 분석해
+인원이 많은 출발지 쪽과 지리적 중간을 함께 고려해 추천해줘.`
 
   return `너는 한국 최고의 모임 장소 큐레이터야.
-네이버 플레이스 리뷰, 인스타그램 핫플, 망고플레이트 인기 맛집 데이터를 
-기반으로 실제로 요즘 뜨는 장소를 추천해줘.
+웹 검색으로 네이버 플레이스, 인스타그램 핫플, 망고플레이트 등
+실제로 현재 운영 중이고 요즘 뜨는 장소만 추천해줘.
 
 [참여자 출발 위치]
 ${locations}
+
+[참여자 인원 분포]
+${participantDistribution} (총 ${locationAnalysis.totalPeople}명)
 
 [계산된 중간 지점]
 ${midpointSection}
@@ -106,70 +125,52 @@ ${midpointSection}
 - 분위기: ${inputs.vibe || '미정'}
 - 이동 우선순위: ${inputs.movePriority || '미정'}
 
-[중요 규칙]
-1. 참여자들의 실제 출발 위치를 분석해서 지리적 중간 지점 혹은 인기있는 지역을 추천해줘.
-   서울로 한정하지 말고 수원, 분당, 판교, 광교, 용인, 인천 등
-   실제 중간에 해당하는 지역도 적극 추천해줘.
-   예) 수원역 + 병점역 → 수원 행궁동, 광교, 영통 추천
+[추천 철학 — 반드시 따를 것]
+이동 거리가 완벽히 공평하지 않아도 괜찮아.
+참여자 다수가 가기 편하고, 요즘 핫한 지역을 우선 추천해줘.
+단, 소수 인원이 극단적으로 불리하지 않도록 고려해줘.
+지리적 중간점보다 접근성 좋은 핫플·인기 상권을 우선해줘.
 
-2. 식당은 반드시 다음 기준으로 선정해줘:
+[중요 규칙]
+1. 참여자 출발 위치와 인원 분포를 분석해 추천해줘.
+   인원이 많은 출발지에 가깝고, 동시에 다수가 모이기 좋은 핫한 지역을 우선해줘.
+   서울로 한정하지 말고 수원, 분당, 판교, 광교, 용인, 인천 등
+   실제로 접근성이 좋은 지역도 적극 추천해줘.
+
+2. 식당은 반드시 웹 검색으로 확인한 실제 운영 중인 곳만 선정해줘:
    - 네이버 플레이스 평점 4.0 이상
-   - 최근 6개월 내 인스타그램/SNS에서 언급된 핫플
+   - 최근 6개월 내 SNS에서 언급된 핫플
    - 웨이팅이 있을 정도로 인기 있는 곳 우선
    - 각 지역당 반드시 정확히 3개 추천
 
-3. 액티비티는 만남 목적에 따라 아래 기준으로 구체적으로 추천해줘:
+3. 액티비티는 만남 목적(${inputs.purpose})에 맞게 웹 검색으로
+   현재 실제 운영 중인 장소만 추천해줘.
+   아래 예시 템플릿·가상 장소명은 절대 사용하지 마.
+   반드시 웹 검색으로 확인한 실제 장소만 추천해.
 
-   [친목/동기모임/회식]
-   - 볼링장: 구체적인 장소명 (예: 강남 볼링클럽)
-   - 방탈출: 구체적인 테마명 (예: 홍대 넥스트에디션 '저택의 비밀')
-   - 노래방: 구체적인 장소명 (예: 코인노래방 싱싱)
-   - 다트바: 구체적인 장소명
-   - 보드게임카페: 구체적인 장소명
+   각 액티비티 text에는 아래 정보를 모두 포함해:
+   - 실제 장소명
+   - 주소 또는 위치 (예: 성수동 OO로)
+   - 가격 (예: 1인 25,000원)
+   - 운영시간
+   - 특징 한 줄 (예: 인스타 핫플, 웨이팅 있음)
+   - 예약 필요 여부
 
-   [소개팅/데이트]
-   - 감성 카페: 구체적인 카페명 + 대표 메뉴
-     (예: 성수 어니언 - 앤틱한 인테리어, 소금빵 유명)
-   - 전시/팝업: 현재 진행 중인 전시명
-     (예: 성수 무신사 팝업 '아디다스 오리지널스')
-   - 서점: 구체적인 서점명
-     (예: 을지로 최인아책방 - 독립서점, 분위기 좋음)
-   - 만화카페: 구체적인 장소명
-   - 루프탑 바: 구체적인 장소명 + 시그니처 칵테일
+   목적별 추가 요구사항:
+   - 방탈출: 테마명까지 구체적으로
+   - 팝업/전시: 현재 진행 중인 팝업명 + 기간
+   - 카페: 대표 메뉴 + 분위기 키워드
+   - 볼링·노래방·다트·보드게임 등: 실제 상호명 + 이용 요금
 
-   [스터디]
-   - 스터디카페: 구체적인 장소명 + 1인 가격
-   - 북카페: 구체적인 장소명
-   - 조용한 카페: 콘센트/와이파이 여부 포함
-
-   [비즈니스/선후배]
-   - 호텔 라운지: 구체적인 장소명
-   - 프라이빗 룸: 구체적인 식당명
-   - 조용한 카페: 구체적인 장소명
-
-   [청첩장모임]
-   - 프라이빗 카페: 구체적인 장소명
-   - 갤러리 카페: 구체적인 장소명
-   - 한옥 카페: 구체적인 장소명
-
-4. 액티비티 출력 형식은 반드시 이렇게 해줘:
-   뭉뚱그려서 "감성 카페 방문" 이렇게 쓰지 말고
-   반드시 아래처럼 구체적으로:
-   
-   ✅ 좋은 예시:
-   "성수 어니언 카페 - 앤틱한 공간, 소금빵·크루아상 유명. 
-    웨이팅 있으니 도착 전 웨이팅 앱 등록 추천"
-   
-   "홍대 넥스트에디션 방탈출 '저택의 비밀' - 
-    난이도 중상, 4인 기준 인당 25,000원, 예약 필수"
-   
-   ❌ 나쁜 예시:
-   "인근 카페에서 커피"
-   "노래방 방문"
+4. 액티비티 출력 형식:
+   뭉뚱그려 "감성 카페 방문", "노래방 방문"처럼 쓰지 말고
+   위 필드를 한 문단에 담아 구체적으로 작성해.
+   형식 예시 (장소명은 반드시 웹 검색으로 확인한 실제 이름 사용):
+   "[장소명] - [주소/위치] · [가격] · [운영시간] · [특징] · [예약 여부]"
 
 5. regions 배열은 rank 1, rank 2 두 지역을 포함해야 해.
    각 region의 matchScore는 0~100 정수로 계산해줘.
-   계산 기준: 목적·분위기 일치도(40) + 예산 적합도(30) + 지역 특성(30)
+   계산 기준: 목적·분위기 일치도(40) + 예산 적합도(30) + 지역 접근성·핫플 점수(30)
 
 반드시 아래 JSON 형식으로만 응답해. 다른 텍스트 없이:
 {
@@ -216,12 +217,12 @@ ${midpointSection}
         },
         {
           "label": "2차",
-          "text": "구체적인 장소명 - 상세 설명 (가격, 특징, 팁)",
+          "text": "[실제 장소명] - [주소] · [가격] · [운영시간] · [특징] · [예약 여부]",
           "color": "green"
         },
         {
           "label": "3차",
-          "text": "구체적인 장소명 - 상세 설명",
+          "text": "[실제 장소명] - [주소] · [가격] · [운영시간] · [특징] · [예약 여부]",
           "color": "amber"
         }
       ]
@@ -238,8 +239,8 @@ ${midpointSection}
       ],
       "activities": [
         { "label": "1차", "text": "...", "color": "indigo" },
-        { "label": "2차", "text": "...", "color": "green" },
-        { "label": "3차", "text": "...", "color": "amber" }
+        { "label": "2차", "text": "[실제 장소명] - [주소] · [가격] · [운영시간] · [특징] · [예약 여부]", "color": "green" },
+        { "label": "3차", "text": "[실제 장소명] - [주소] · [가격] · [운영시간] · [특징] · [예약 여부]", "color": "amber" }
       ]
     }
   ],
@@ -386,7 +387,7 @@ export async function getAIRecommendation(
   options?.onStatus?.('위치 분석 중...')
   const locationAnalysis = await analyzeParticipantLocations(inputs.locations)
 
-  const prompt = buildPrompt(inputs, locationAnalysis.midpointRegionName)
+  const prompt = buildPrompt(inputs, locationAnalysis)
   let lastError: Error | null = null
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {

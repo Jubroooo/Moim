@@ -110,7 +110,13 @@ export default function RestaurantCard({
   )
 }
 
-export function RestaurantCardGrid({ children }: { children: ReactNode }) {
+export function RestaurantCardGrid({
+  children,
+  relaxedScroll = false,
+}: {
+  children: ReactNode
+  relaxedScroll?: boolean
+}) {
   const items = Children.toArray(children)
   const scrollRef = useRef<HTMLDivElement>(null)
   const [activeIndex, setActiveIndex] = useState(0)
@@ -149,10 +155,46 @@ export function RestaurantCardGrid({ children }: { children: ReactNode }) {
     }
   }, [items.length])
 
+  useEffect(() => {
+    if (!relaxedScroll) return
+
+    const container = scrollRef.current
+    if (!container) return
+
+    const WHEEL_SCROLL_FACTOR = 0.65
+
+    const handleWheel = (event: WheelEvent) => {
+      if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return
+
+      const maxScroll = container.scrollWidth - container.clientWidth
+      if (maxScroll <= 0) return
+
+      const scrollingForward = event.deltaY > 0
+      const atStart = container.scrollLeft <= 0
+      const atEnd = container.scrollLeft >= maxScroll - 1
+
+      if ((scrollingForward && atEnd) || (!scrollingForward && atStart)) return
+
+      event.preventDefault()
+      container.scrollBy({
+        left: event.deltaY * WHEEL_SCROLL_FACTOR,
+        behavior: 'auto',
+      })
+    }
+
+    container.addEventListener('wheel', handleWheel, { passive: false })
+    return () => container.removeEventListener('wheel', handleWheel)
+  }, [relaxedScroll, items.length])
+
   return (
     <>
       <div className="restaurant-carousel-outer md:hidden">
-        <div ref={scrollRef} className="restaurant-carousel flex gap-3 px-4">
+        <div
+          ref={scrollRef}
+          className={`restaurant-carousel flex gap-3 px-4${
+            relaxedScroll ? ' restaurant-carousel--vote' : ''
+          }`}
+        >
           {Children.map(children, (child, index) => {
             const key = isValidElement(child)
               ? (child as ReactElement).key ?? index

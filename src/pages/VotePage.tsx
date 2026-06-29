@@ -1,9 +1,10 @@
 import { AnimatePresence, motion } from 'framer-motion'
 import { useEffect, useMemo, useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { useParams, useSearchParams } from 'react-router-dom'
 
 import RestaurantCard, { RestaurantCardGrid } from '../components/RestaurantCard'
 import { RESTAURANTS_PER_REGION } from '../lib/api'
+import { applyVoteOgTags, parseVoteOgMetadata } from '../lib/og'
 import {
   getStorageKey,
   loadSharedResult,
@@ -197,12 +198,25 @@ function ErrorPage() {
 
 export default function VotePage() {
   const { shareId } = useParams<{ shareId: string }>()
+  const [searchParams] = useSearchParams()
 
   const [phase, setPhase] = useState<PagePhase>('loading')
   const [result, setResult] = useState<MidpointResult | null>(null)
   const [voterName, setVoterName] = useState('')
   const [nameInput, setNameInput] = useState('')
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+
+  useEffect(() => {
+    if (!shareId) return
+
+    const metadata = parseVoteOgMetadata(searchParams)
+    if (!metadata) return
+
+    applyVoteOgTags(
+      metadata,
+      `${window.location.origin}/vote/${shareId}?${searchParams.toString()}`,
+    )
+  }, [shareId, searchParams])
 
   useEffect(() => {
     if (!shareId) {
@@ -336,7 +350,7 @@ export default function VotePage() {
                   <h2 className="text-sm font-medium text-emerald-400">
                     {group.label}
                   </h2>
-                  <RestaurantCardGrid>
+                  <RestaurantCardGrid relaxedScroll>
                     {group.restaurants.map((restaurant) => (
                       <RestaurantCard
                         key={restaurant.id}

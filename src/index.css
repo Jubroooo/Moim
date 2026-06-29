@@ -111,6 +111,14 @@
   -webkit-overflow-scrolling: touch;
 }
 
+.restaurant-carousel--vote {
+  scroll-behavior: smooth;
+  -webkit-overflow-scrolling: auto;
+  scroll-snap-type: x proximity;
+  scroll-padding: 1rem;
+  overscroll-behavior-x: contain;
+}
+
 .restaurant-carousel::-webkit-scrollbar {
   display: none;
 }

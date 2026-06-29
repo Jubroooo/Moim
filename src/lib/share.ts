@@ -1,5 +1,10 @@
 import { nanoid } from 'nanoid'
 
+import {
+  buildVoteOgMetadata,
+  buildVoteShareUrl,
+  getSiteBaseUrl,
+} from './og'
 import type { MidpointResult } from '../types'
 
 export function createShareLink(result: MidpointResult): {
@@ -11,7 +16,8 @@ export function createShareLink(result: MidpointResult): {
 
   localStorage.setItem(`midpoint_${shareId}`, JSON.stringify(updatedResult))
 
-  const shareUrl = `${window.location.origin}/vote/${shareId}`
+  const metadata = buildVoteOgMetadata(updatedResult)
+  const shareUrl = buildVoteShareUrl(shareId, metadata, getSiteBaseUrl())
 
   return { url: shareUrl, updatedResult }
 }
