@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useParams } from 'react-router-dom'
 
 import RestaurantCard, { RestaurantCardGrid } from '../components/RestaurantCard'
+import { RESTAURANTS_PER_REGION } from '../lib/api'
 import {
   getStorageKey,
   loadSharedResult,
@@ -20,7 +21,7 @@ interface RegionGroup {
 function getRegionGroups(result: MidpointResult): RegionGroup[] {
   return result.regions.map((region) => ({
     label: `${region.rank === 1 ? '1순위' : '2순위'} · ${region.name}`,
-    restaurants: region.restaurants.slice(0, 3),
+    restaurants: region.restaurants.slice(0, RESTAURANTS_PER_REGION),
   }))
 }
 

@@ -97,14 +97,14 @@
 .restaurant-carousel-outer {
   width: 100%;
   max-width: 100%;
-  overflow: hidden;
 }
 
 .restaurant-carousel {
   width: 100%;
   max-width: 100%;
+  align-items: flex-start;
   overflow-x: auto;
-  overflow-y: hidden;
+  overflow-y: visible;
   scroll-snap-type: x mandatory;
   scrollbar-width: none;
   -ms-overflow-style: none;
@@ -120,5 +120,7 @@
   width: calc(100vw - 3rem);
   max-width: calc(100vw - 3rem);
   min-width: 0;
+  min-height: 0;
+  height: auto;
   scroll-snap-align: center;
 }

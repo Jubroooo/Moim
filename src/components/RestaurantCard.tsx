@@ -43,7 +43,7 @@ export default function RestaurantCard({
       type={selectable ? 'button' : undefined}
       onClick={selectable ? handleCardClick : undefined}
       aria-pressed={selectable ? selected : undefined}
-      className={`group relative w-full min-w-0 max-w-full overflow-hidden rounded-xl border text-left backdrop-blur-sm transition ${
+      className={`group relative flex min-h-0 w-full min-w-0 max-w-full flex-col rounded-xl border text-left backdrop-blur-sm transition ${
         selected
           ? 'scale-[1.02] cursor-pointer border-indigo-500/70 bg-indigo-500/10 shadow-[0_0_20px_rgba(99,102,241,0.15)]'
           : selectable
@@ -69,7 +69,7 @@ export default function RestaurantCard({
 
       <RestaurantCardImage emoji={restaurant.emoji} tags={restaurant.tags} />
 
-      <div className="space-y-2 p-3.5">
+      <div className="flex min-h-0 flex-1 flex-col space-y-2 whitespace-normal p-2.5">
         <h4 className="font-bold text-white">{restaurant.name}</h4>
 
         {restaurant.tags.length > 0 ? (
@@ -77,7 +77,7 @@ export default function RestaurantCard({
             {restaurant.tags.map((tag) => (
               <span
                 key={tag}
-                className="rounded-full bg-white/[0.06] px-2 py-0.5 text-[10px] text-slate-400"
+                className="whitespace-normal rounded-full bg-white/[0.06] px-2 py-0.5 text-[10px] text-slate-400"
               >
                 {tag.startsWith('#') ? tag : `#${tag}`}
               </span>
@@ -85,10 +85,14 @@ export default function RestaurantCard({
           </div>
         ) : null}
 
-        <p className="text-sm font-medium text-indigo-400">{restaurant.priceRange}</p>
-        <p className="text-xs leading-relaxed text-slate-400">{restaurant.description}</p>
+        <p className="whitespace-normal text-sm font-medium text-indigo-400">
+          {restaurant.priceRange}
+        </p>
+        <p className="whitespace-normal text-xs leading-relaxed text-slate-400">
+          {restaurant.description}
+        </p>
 
-        <div className="flex justify-end pt-1">
+        <div className="mt-auto flex shrink-0 justify-end pt-1">
           <a
             href={getNaverPlaceSearchUrl(restaurant.name)}
             target="_blank"
@@ -155,7 +159,7 @@ export function RestaurantCardGrid({ children }: { children: ReactNode }) {
             return (
               <div
                 key={key}
-                className={`restaurant-carousel-item min-w-0 max-w-full ${
+                className={`restaurant-carousel-item flex min-h-0 min-w-0 max-w-full self-start ${
                   index === activeIndex ? 'opacity-100' : 'opacity-75'
                 } transition-opacity duration-300`}
               >

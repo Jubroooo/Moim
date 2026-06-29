@@ -22,6 +22,8 @@ export const LOADING_STEP_MESSAGES = [
 ] as const
 
 const MAX_RETRIES = 2
+const RESTAURANTS_PER_REGION = 3
+const REQUIRED_REGION_COUNT = 2
 const API_URL = 'https://api.openai.com/v1/chat/completions'
 const MODEL = 'gpt-4o-search-preview'
 
@@ -89,6 +91,9 @@ function buildPrompt(inputs: AIRecommendationInputs): string {
 웹서치를 통해 실제 존재하는 서울 식당과 장소를 찾아서 추천해줘.
 네이버 지도, 카카오맵 기준으로 실제 평점이 높은 곳 위주로 추천해.
 
+각 지역마다 반드시 식당을 정확히 3개 추천해줘. restaurants 배열은 항상 length가 3이어야 해.
+regions 배열은 rank 1, rank 2 두 지역을 포함해야 해.
+
 각 참여자별로 1순위 추천 지역까지의 예상 이동 시간(분)을 balances에 포함해줘.
 참여자 이름은 A, B, C, D, E, F 순서로 부여해.
 
@@ -108,10 +113,26 @@ function buildPrompt(inputs: AIRecommendationInputs): string {
       "restaurants": [
         {
           "id": "r1",
-          "name": "실제 식당명",
+          "name": "실제 식당명1",
           "emoji": "🍽️",
           "tags": ["#태그1", "#태그2"],
           "priceRange": "1인 20,000~35,000원",
+          "description": "추천 이유 한 줄"
+        },
+        {
+          "id": "r2",
+          "name": "실제 식당명2",
+          "emoji": "🍜",
+          "tags": ["#태그1", "#태그2"],
+          "priceRange": "1인 15,000~25,000원",
+          "description": "추천 이유 한 줄"
+        },
+        {
+          "id": "r3",
+          "name": "실제 식당명3",
+          "emoji": "🥘",
+          "tags": ["#태그1", "#태그2"],
+          "priceRange": "1인 25,000~40,000원",
           "description": "추천 이유 한 줄"
         }
       ],
@@ -121,7 +142,7 @@ function buildPrompt(inputs: AIRecommendationInputs): string {
         { "label": "3차", "text": "설명", "color": "amber" }
       ]
     },
-    { "rank": 2, "name": "...", "reasons": [], "restaurants": [], "activities": [] }
+    { "rank": 2, "name": "...", "reasons": ["..."], "restaurants": [{ "id": "r4", "...": "..." }, { "id": "r5", "...": "..." }, { "id": "r6", "...": "..." }], "activities": [] }
   ],
   "balances": [
     { "name": "A", "location": "출발지1", "minutes": 25 },
@@ -163,20 +184,40 @@ function extractJson(text: string): ParsedAIResponse {
   }
 }
 
+function validateRestaurantCounts(regions: ParsedRegion[]): void {
+  if (regions.length < REQUIRED_REGION_COUNT) {
+    throw new Error(
+      `추천 지역이 ${REQUIRED_REGION_COUNT}개 미만입니다 (${regions.length}개)`,
+    )
+  }
+
+  for (const region of regions.slice(0, REQUIRED_REGION_COUNT)) {
+    const count = region.restaurants?.length ?? 0
+
+    if (count < RESTAURANTS_PER_REGION) {
+      throw new Error(
+        `"${region.name}" 지역의 식당이 ${RESTAURANTS_PER_REGION}개 미만입니다 (${count}개)`,
+      )
+    }
+  }
+}
+
 function normalizeRegions(regions: ParsedRegion[]): RegionRecommendation[] {
-  return regions.map((region) => ({
+  return regions.slice(0, REQUIRED_REGION_COUNT).map((region) => ({
     rank: (region.rank === 2 ? 2 : 1) as 1 | 2,
     name: region.name,
     reasons: region.reasons ?? [],
-    restaurants: (region.restaurants ?? []).map((restaurant) => ({
-      id: restaurant.id || nanoid(8),
-      name: restaurant.name,
-      emoji: restaurant.emoji || '🍽️',
-      tags: restaurant.tags ?? [],
-      priceRange: restaurant.priceRange,
-      description: restaurant.description,
-      region: region.name,
-    })),
+    restaurants: (region.restaurants ?? [])
+      .slice(0, RESTAURANTS_PER_REGION)
+      .map((restaurant, index) => ({
+        id: restaurant.id || `${region.rank}-r${index + 1}-${nanoid(6)}`,
+        name: restaurant.name,
+        emoji: restaurant.emoji || '🍽️',
+        tags: restaurant.tags ?? [],
+        priceRange: restaurant.priceRange,
+        description: restaurant.description,
+        region: region.name,
+      })),
     activities: region.activities ?? [],
   }))
 }
@@ -262,6 +303,7 @@ export async function getAIRecommendation(
     try {
       const textContent = await callOpenAIAPI(prompt, apiKey)
       const parsed = extractJson(textContent)
+      validateRestaurantCounts(parsed.regions)
       const regions = normalizeRegions(parsed.regions)
 
       if (regions.length === 0) {
@@ -299,3 +341,5 @@ export async function getAIRecommendation(
 
   throw lastError ?? new Error('AI 추천을 가져오지 못했습니다')
 }
+
+export { REQUIRED_REGION_COUNT, RESTAURANTS_PER_REGION }
