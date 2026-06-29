@@ -9,7 +9,7 @@ import {
   type ReactNode,
 } from 'react'
 
-import { openNaverPlaceSearch } from '../lib/naverMap'
+import { getNaverPlaceSearchUrl } from '../lib/naverMap'
 import type { Restaurant } from '../types'
 import RestaurantCardImage from './RestaurantCardImage'
 
@@ -27,62 +27,44 @@ export default function RestaurantCard({
   onSelect,
 }: RestaurantCardProps) {
   const handleCardClick = () => {
-    openNaverPlaceSearch(restaurant.name)
-  }
-
-  const handleSelectClick = (event: MouseEvent<HTMLButtonElement>) => {
-    event.stopPropagation()
-    onSelect?.()
+    if (selectable) {
+      onSelect?.()
+    }
   }
 
   const handleNaverLinkClick = (event: MouseEvent<HTMLAnchorElement>) => {
     event.stopPropagation()
-    openNaverPlaceSearch(restaurant.name)
   }
 
+  const Wrapper = selectable ? 'button' : 'article'
+
   return (
-    <article
-      role="link"
-      tabIndex={0}
-      onClick={handleCardClick}
-      onKeyDown={(event) => {
-        if (event.key === 'Enter' || event.key === ' ') {
-          event.preventDefault()
-          handleCardClick()
-        }
-      }}
-      className={`group relative w-full cursor-pointer overflow-hidden rounded-xl border text-left backdrop-blur-sm transition ${
+    <Wrapper
+      type={selectable ? 'button' : undefined}
+      onClick={selectable ? handleCardClick : undefined}
+      aria-pressed={selectable ? selected : undefined}
+      className={`group relative w-full min-w-0 max-w-full overflow-hidden rounded-xl border text-left backdrop-blur-sm transition ${
         selected
-          ? 'scale-[1.02] border-indigo-500/70 bg-indigo-500/10 shadow-[0_0_20px_rgba(99,102,241,0.15)]'
-          : 'border-white/[0.08] bg-white/[0.03] hover:border-indigo-500/50 hover:bg-white/[0.05]'
+          ? 'scale-[1.02] cursor-pointer border-indigo-500/70 bg-indigo-500/10 shadow-[0_0_20px_rgba(99,102,241,0.15)]'
+          : selectable
+            ? 'cursor-pointer border-white/[0.08] bg-white/[0.03] hover:border-indigo-500/50 hover:bg-white/[0.05]'
+            : 'border-white/[0.08] bg-white/[0.03]'
       }`}
     >
-      {selectable ? (
-        <button
-          type="button"
-          onClick={handleSelectClick}
-          aria-label={selected ? `${restaurant.name} 선택 해제` : `${restaurant.name} 선택`}
-          aria-pressed={selected}
-          className={`absolute left-2 top-2 z-10 flex h-7 w-7 items-center justify-center rounded-full border transition ${
-            selected
-              ? 'border-indigo-400 bg-indigo-500 text-white'
-              : 'border-white/30 bg-black/40 text-transparent hover:border-indigo-400/60'
-          }`}
-        >
-          {selected ? (
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.5"
-              className="h-4 w-4"
-              aria-hidden
-            >
-              <path d="M20 6 9 17l-5-5" />
-            </svg>
-          ) : null}
-        </button>
+      {selected && selectable ? (
+        <div className="absolute right-2 top-2 z-10 flex h-7 w-7 items-center justify-center rounded-full bg-indigo-500 text-white shadow-lg">
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.5"
+            className="h-4 w-4"
+            aria-hidden
+          >
+            <path d="M20 6 9 17l-5-5" />
+          </svg>
+        </div>
       ) : null}
 
       <RestaurantCardImage emoji={restaurant.emoji} tags={restaurant.tags} />
@@ -108,17 +90,17 @@ export default function RestaurantCard({
 
         <div className="flex justify-end pt-1">
           <a
-            href={`https://map.naver.com/v5/search/${encodeURIComponent(restaurant.name)}`}
+            href={getNaverPlaceSearchUrl(restaurant.name)}
             target="_blank"
             rel="noopener noreferrer"
             onClick={handleNaverLinkClick}
-            className="text-[11px] font-medium text-indigo-400 transition group-hover:text-indigo-300"
+            className="text-[11px] font-medium text-indigo-400 transition hover:text-indigo-300 hover:underline"
           >
             네이버 지도에서 보기 →
           </a>
         </div>
       </div>
-    </article>
+    </Wrapper>
   )
 }
 
@@ -163,7 +145,7 @@ export function RestaurantCardGrid({ children }: { children: ReactNode }) {
 
   return (
     <>
-      <div className="md:hidden">
+      <div className="restaurant-carousel-outer md:hidden">
         <div ref={scrollRef} className="restaurant-carousel flex gap-3 px-4">
           {Children.map(children, (child, index) => {
             const key = isValidElement(child)
@@ -173,9 +155,9 @@ export function RestaurantCardGrid({ children }: { children: ReactNode }) {
             return (
               <div
                 key={key}
-                className={`restaurant-carousel-item transition-opacity duration-300 ${
+                className={`restaurant-carousel-item min-w-0 max-w-full ${
                   index === activeIndex ? 'opacity-100' : 'opacity-75'
-                }`}
+                } transition-opacity duration-300`}
               >
                 {child}
               </div>
@@ -197,7 +179,7 @@ export function RestaurantCardGrid({ children }: { children: ReactNode }) {
         </div>
       </div>
 
-      <div className="hidden gap-3 md:grid md:grid-cols-3">{children}</div>
+      <div className="hidden min-w-0 gap-3 md:grid md:grid-cols-3">{children}</div>
     </>
   )
 }

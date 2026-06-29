@@ -77,7 +77,7 @@ function GlassCard({
 }) {
   return (
     <section
-      className={`rounded-2xl border border-white/[0.08] bg-white/[0.04] p-5 backdrop-blur-md sm:p-6 ${className}`}
+      className={`box-border min-w-0 max-w-full rounded-2xl border border-white/[0.08] bg-white/[0.04] p-5 backdrop-blur-md sm:p-6 ${className}`}
     >
       {children}
     </section>
@@ -142,7 +142,7 @@ function CityMapOverlay() {
 
 function HeroSection() {
   return (
-    <header className="hero-gradient relative overflow-hidden px-4 pb-10 pt-12 sm:px-6 sm:pb-14 sm:pt-16">
+    <header className="hero-gradient relative overflow-hidden px-4 pb-10 pt-12 sm:px-6 sm:pb-14 sm:pt-16 max-w-[100vw]">
       <CityMapOverlay />
 
       <div className="relative mx-auto max-w-2xl text-center">
@@ -504,7 +504,7 @@ function CtaSection() {
     <>
       <LoadingOverlay visible={isLoading} />
 
-      <div className="sticky bottom-0 -mx-4 border-t border-white/[0.06] bg-[#0F172A]/90 px-4 py-4 backdrop-blur-lg sm:-mx-6 sm:px-6">
+      <div className="sticky bottom-0 box-border w-full max-w-[100vw] border-t border-white/[0.06] bg-[#0F172A]/90 px-4 py-4 backdrop-blur-lg sm:px-6">
         {error ? (
           <p className="mb-3 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">
             {error}
@@ -526,10 +526,10 @@ function CtaSection() {
 
 export default function HomePage() {
   return (
-    <div className="min-h-screen bg-[#0F172A]">
+    <div className="min-h-screen w-full max-w-[100vw] overflow-x-hidden bg-[#0F172A]">
       <HeroSection />
 
-      <main className="mx-auto max-w-2xl space-y-4 px-4 pb-28 pt-6 sm:space-y-5 sm:px-6 sm:pb-32 sm:pt-8">
+      <main className="mx-auto box-border w-full min-w-0 max-w-2xl space-y-4 px-4 pb-28 pt-6 sm:space-y-5 sm:px-6 sm:pb-32 sm:pt-8">
         <PeopleSection />
         <PurposeSection />
         <FoodPreferencesSection />

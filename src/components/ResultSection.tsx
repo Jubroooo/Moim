@@ -39,7 +39,7 @@ function RegionSection({ region }: { region: RegionRecommendation }) {
   const rankLabel = region.rank === 1 ? '1순위' : '2순위'
 
   return (
-    <section className="rounded-2xl border border-white/[0.08] bg-white/[0.04] p-5 backdrop-blur-md sm:p-6">
+    <section className="box-border min-w-0 max-w-full overflow-hidden rounded-2xl border border-white/[0.08] bg-white/[0.04] p-5 backdrop-blur-md sm:p-6">
       <div className="mb-5 flex flex-wrap items-start gap-3">
         <span
           className={`rounded-lg px-2.5 py-1 text-xs font-bold ${
@@ -104,7 +104,7 @@ function BalanceBarChart({
   const maxMinutes = Math.max(...balances.map((b) => b.minutes), 1)
 
   return (
-    <section className="rounded-2xl border border-white/[0.08] bg-white/[0.04] p-5 backdrop-blur-md sm:p-6">
+    <section className="box-border min-w-0 max-w-full overflow-hidden rounded-2xl border border-white/[0.08] bg-white/[0.04] p-5 backdrop-blur-md sm:p-6">
       <h3 className="mb-4 text-lg font-semibold text-white">이동 시간 균형</h3>
 
       <div className="space-y-4">
@@ -228,7 +228,7 @@ export default function ResultSection() {
         initial={{ opacity: 0, y: 32 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.45, ease: 'easeOut' }}
-        className="space-y-5 border-t border-white/[0.06] pt-8 sm:space-y-6"
+        className="box-border min-w-0 max-w-full space-y-5 border-t border-white/[0.06] pt-8 sm:space-y-6"
         aria-label="AI 추천 결과"
       >
         <ResultHeader result={result} />

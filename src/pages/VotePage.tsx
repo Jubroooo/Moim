@@ -289,7 +289,7 @@ export default function VotePage() {
   const selectedCount = selectedIds.size
 
   return (
-    <div className="min-h-screen bg-[#0F172A]">
+    <div className="min-h-screen w-full max-w-[100vw] overflow-x-hidden bg-[#0F172A]">
       <header className="border-b border-white/[0.06] px-4 py-5 sm:px-6">
         <div className="mx-auto max-w-2xl">
           <p className="text-sm text-slate-400">
@@ -300,7 +300,7 @@ export default function VotePage() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-2xl space-y-6 px-4 py-6 pb-32 sm:px-6 sm:py-8">
+      <main className="mx-auto box-border w-full min-w-0 max-w-2xl space-y-6 px-4 py-6 pb-32 sm:px-6 sm:py-8">
         <AnimatePresence mode="wait">
           {phase === 'thanks' ? (
             <motion.div
