@@ -48,3 +48,39 @@
   background-size: 200% 200%;
   animation: hero-gradient 12s ease infinite;
 }
+
+@keyframes shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+.skeleton-shimmer {
+  background: linear-gradient(
+    90deg,
+    #1e293b 0%,
+    #334155 50%,
+    #1e293b 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+}
+
+.restaurant-carousel {
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.restaurant-carousel::-webkit-scrollbar {
+  display: none;
+}
+
+.restaurant-carousel-item {
+  flex: 0 0 78%;
+  scroll-snap-align: center;
+}

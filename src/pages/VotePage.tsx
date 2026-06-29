@@ -342,7 +342,7 @@ export default function VotePage() {
                         restaurant={restaurant}
                         selectable
                         selected={selectedIds.has(restaurant.id)}
-                        onClick={() => toggleSelection(restaurant.id)}
+                        onSelect={() => toggleSelection(restaurant.id)}
                       />
                     ))}
                   </RestaurantCardGrid>

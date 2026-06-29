@@ -2,12 +2,6 @@ import { nanoid } from 'nanoid'
 
 import type { MidpointResult } from '../types'
 
-const DEFAULT_SHARE_BASE = 'https://yourdomain.com'
-
-export function getShareBaseUrl(): string {
-  return import.meta.env.VITE_SHARE_BASE_URL ?? DEFAULT_SHARE_BASE
-}
-
 export function createShareLink(result: MidpointResult): {
   url: string
   updatedResult: MidpointResult
@@ -17,9 +11,9 @@ export function createShareLink(result: MidpointResult): {
 
   localStorage.setItem(`midpoint_${shareId}`, JSON.stringify(updatedResult))
 
-  const url = `${getShareBaseUrl()}/vote/${shareId}`
+  const shareUrl = `${window.location.origin}/vote/${shareId}`
 
-  return { url, updatedResult }
+  return { url: shareUrl, updatedResult }
 }
 
 export function loadSharedResult(shareId: string): MidpointResult | null {

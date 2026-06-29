@@ -1,5 +1,6 @@
 import { nanoid } from 'nanoid'
 
+import { calculateFairnessScore, normalizeMatchScore } from './scores'
 import type { MidpointResult, RegionRecommendation } from '../types'
 
 export interface AIRecommendationInputs {
@@ -54,9 +55,17 @@ interface ParsedRegion {
   activities: { label: string; text: string; color: string }[]
 }
 
+interface ParsedBalance {
+  name: string
+  location: string
+  minutes: number
+}
+
 interface ParsedAIResponse {
   regions: ParsedRegion[]
   summary: string
+  matchScore: number
+  balances: ParsedBalance[]
 }
 
 function buildPrompt(inputs: AIRecommendationInputs): string {
@@ -79,6 +88,15 @@ function buildPrompt(inputs: AIRecommendationInputs): string {
 
 웹서치를 통해 실제 존재하는 서울 식당과 장소를 찾아서 추천해줘.
 네이버 지도, 카카오맵 기준으로 실제 평점이 높은 곳 위주로 추천해.
+
+각 참여자별로 1순위 추천 지역까지의 예상 이동 시간(분)을 balances에 포함해줘.
+참여자 이름은 A, B, C, D, E, F 순서로 부여해.
+
+만남 적합도(matchScore)를 0~100 정수로 직접 계산해서 포함해줘.
+계산 기준:
+- 목적과 분위기 일치도: 40점
+- 예산 적합도: 30점
+- 지역 특성(교통, 분위기, 식당 밀집도 등): 30점
 
 반드시 아래 JSON 형식으로만 응답해. 다른 텍스트는 넣지 마:
 {
@@ -105,6 +123,11 @@ function buildPrompt(inputs: AIRecommendationInputs): string {
     },
     { "rank": 2, "name": "...", "reasons": [], "restaurants": [], "activities": [] }
   ],
+  "balances": [
+    { "name": "A", "location": "출발지1", "minutes": 25 },
+    { "name": "B", "location": "출발지2", "minutes": 30 }
+  ],
+  "matchScore": 85,
   "summary": "총평 한 문단"
 }`
 }
@@ -118,7 +141,9 @@ function extractJson(text: string): ParsedAIResponse {
       typeof parsed !== 'object' ||
       parsed === null ||
       !('regions' in parsed) ||
-      !('summary' in parsed)
+      !('summary' in parsed) ||
+      !('matchScore' in parsed) ||
+      !('balances' in parsed)
     ) {
       throw new Error('Invalid AI response shape')
     }
@@ -156,13 +181,32 @@ function normalizeRegions(regions: ParsedRegion[]): RegionRecommendation[] {
   }))
 }
 
-function buildBalances(locations: string[]) {
+function normalizeBalances(
+  balances: ParsedBalance[],
+  locations: string[],
+): MidpointResult['balances'] {
   const avatarLetters = ['A', 'B', 'C', 'D', 'E', 'F']
-  return locations.map((location, index) => ({
-    name: avatarLetters[index] ?? `P${index + 1}`,
-    location,
-    minutes: 18 + index * 4,
-  }))
+
+  if (!Array.isArray(balances) || balances.length === 0) {
+    throw new Error('이동 시간 데이터가 없습니다')
+  }
+
+  return locations.map((location, index) => {
+    const expectedName = avatarLetters[index] ?? `P${index + 1}`
+    const matched =
+      balances.find((balance) => balance.name === expectedName) ??
+      balances[index]
+
+    if (!matched || typeof matched.minutes !== 'number') {
+      throw new Error('이동 시간 데이터 형식이 올바르지 않습니다')
+    }
+
+    return {
+      name: expectedName,
+      location: matched.location || location,
+      minutes: Math.max(0, Math.round(matched.minutes)),
+    }
+  })
 }
 
 function extractTextContent(data: OpenAIAPIResponse): string {
@@ -224,15 +268,21 @@ export async function getAIRecommendation(
         throw new Error('추천 지역 데이터가 없습니다')
       }
 
+      const balances = normalizeBalances(parsed.balances, inputs.locations)
+      const fairnessScore = calculateFairnessScore(
+        balances.map((balance) => balance.minutes),
+      )
+      const matchScore = normalizeMatchScore(parsed.matchScore)
+
       return {
         purpose: inputs.purpose,
         budget: inputs.budget,
         vibe: inputs.vibe,
         peopleCount: inputs.locations.length,
         regions,
-        fairnessScore: 88,
-        matchScore: 92,
-        balances: buildBalances(inputs.locations),
+        fairnessScore,
+        matchScore,
+        balances,
         summary: parsed.summary,
         shareId: nanoid(10),
         votes: {},
