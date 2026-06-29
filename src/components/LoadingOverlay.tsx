@@ -5,7 +5,13 @@ import { LOADING_STEP_MESSAGES } from '../lib/api'
 
 const STEP_INTERVAL_MS = 2400
 
-export default function LoadingOverlay({ visible }: { visible: boolean }) {
+export default function LoadingOverlay({
+  visible,
+  statusMessage,
+}: {
+  visible: boolean
+  statusMessage?: string | null
+}) {
   const [stepIndex, setStepIndex] = useState(0)
 
   useEffect(() => {
@@ -81,7 +87,9 @@ export default function LoadingOverlay({ visible }: { visible: boolean }) {
                             : 'text-slate-500'
                       }
                     >
-                      {message}
+                      {isActive && statusMessage && index === 0
+                        ? statusMessage
+                        : message}
                     </span>
                   </motion.div>
                 )

@@ -11,6 +11,7 @@ export interface Restaurant {
   priceRange: string
   description: string
   region: string
+  naverSearchQuery?: string
 }
 
 export interface RegionRecommendation {
@@ -35,4 +36,8 @@ export interface MidpointResult {
   shareId: string
   /** restaurantId → voter names */
   votes: Record<string, string[]>
+  /** Kakao geocoded midpoint region name */
+  midpointRegionName?: string
+  /** Whether balances were computed via Kakao API */
+  balancesFromKakao?: boolean
 }

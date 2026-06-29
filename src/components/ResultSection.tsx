@@ -99,14 +99,30 @@ function RegionSection({ region }: { region: RegionRecommendation }) {
 
 function BalanceBarChart({
   balances,
+  fromKakao,
+  midpointRegionName,
 }: {
   balances: MidpointResult['balances']
+  fromKakao?: boolean
+  midpointRegionName?: string
 }) {
   const maxMinutes = Math.max(...balances.map((b) => b.minutes), 1)
 
   return (
     <section className="box-border min-w-0 max-w-full rounded-2xl border border-white/[0.08] bg-white/[0.04] p-5 backdrop-blur-md sm:p-6">
-      <h3 className="mb-4 text-lg font-semibold text-white">이동 시간 균형</h3>
+      <div className="mb-4">
+        <h3 className="text-lg font-semibold text-white">이동 시간 균형</h3>
+        <p className="mt-1 text-xs text-slate-400">
+          {fromKakao
+            ? '대중교통 기준 예상 소요 시간 (직선거리 × 1.4 ÷ 30km/h)'
+            : '예상 소요 시간 (추정치)'}
+        </p>
+        {midpointRegionName ? (
+          <p className="mt-1 text-xs text-emerald-400/80">
+            계산 기준 중간 지점: {midpointRegionName}
+          </p>
+        ) : null}
+      </div>
 
       <div className="space-y-4">
         {balances.map((balance, index) => {
@@ -238,7 +254,11 @@ export default function ResultSection() {
           <RegionSection key={`${region.rank}-${region.name}`} region={region} />
         ))}
 
-        <BalanceBarChart balances={result.balances} />
+        <BalanceBarChart
+          balances={result.balances}
+          fromKakao={result.balancesFromKakao}
+          midpointRegionName={result.midpointRegionName}
+        />
 
         <blockquote className="relative rounded-2xl border border-indigo-500/20 bg-indigo-500/10 px-5 py-5 backdrop-blur-md sm:px-6">
           <span

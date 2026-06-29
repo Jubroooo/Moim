@@ -1,5 +1,10 @@
 import { nanoid } from 'nanoid'
 
+import {
+  analyzeParticipantLocations,
+  buildFallbackBalances,
+  calculateTravelBalances,
+} from './kakaoMap'
 import { calculateFairnessScore, normalizeMatchScore } from './scores'
 import type { MidpointResult, RegionRecommendation } from '../types'
 
@@ -14,12 +19,16 @@ export interface AIRecommendationInputs {
 }
 
 export const LOADING_STEP_MESSAGES = [
-  '참여자 위치를 분석하고 있어요',
+  '위치 분석 중...',
   '서울 맛집 정보를 검색하고 있어요',
   '최적의 만남 지점을 찾고 있어요',
   '예산과 분위기에 맞는 곳을 선별하고 있어요',
   'AI 추천 결과를 정리하고 있어요',
 ] as const
+
+export interface GetAIRecommendationOptions {
+  onStatus?: (message: string) => void
+}
 
 const MAX_RETRIES = 2
 const RESTAURANTS_PER_REGION = 3
@@ -47,109 +56,194 @@ interface ParsedRestaurant {
   tags: string[]
   priceRange: string
   description: string
+  naverSearchQuery?: string
 }
 
 interface ParsedRegion {
   rank: number
   name: string
   reasons: string[]
+  matchScore?: number
   restaurants: ParsedRestaurant[]
   activities: { label: string; text: string; color: string }[]
-}
-
-interface ParsedBalance {
-  name: string
-  location: string
-  minutes: number
 }
 
 interface ParsedAIResponse {
   regions: ParsedRegion[]
   summary: string
-  matchScore: number
-  balances: ParsedBalance[]
+  matchScore?: number
 }
 
-function buildPrompt(inputs: AIRecommendationInputs): string {
+function buildPrompt(
+  inputs: AIRecommendationInputs,
+  midpointRegionName: string | null,
+): string {
   const locations = inputs.locations.join(', ')
   const preferFoods =
     inputs.preferFoods.length > 0 ? inputs.preferFoods.join(', ') : '없음'
   const excludeFoods =
     inputs.excludeFoods.length > 0 ? inputs.excludeFoods.join(', ') : '없음'
+  const midpointSection = midpointRegionName
+    ? `카카오 지도 API로 계산한 지리적 중간 지점 근처 지역: ${midpointRegionName}
+1순위 추천 지역은 이 중간 지점을 중심으로 추천해줘.`
+    : `중간 지점 좌표 정보 없음 — 참여자 출발 위치 텍스트를 분석해 지리적 중간 지점 근처를 추천해줘.`
 
-  return `너는 서울 맛집과 모임 장소 전문가야.
-다음 조건으로 최적의 만남 장소를 추천해줘.
+  return `너는 한국 최고의 모임 장소 큐레이터야.
+네이버 플레이스 리뷰, 인스타그램 핫플, 망고플레이트 인기 맛집 데이터를 
+기반으로 실제로 요즘 뜨는 장소를 추천해줘.
 
-참여자 출발 위치: ${locations}
-만남 목적: ${inputs.purpose}
-선호 음식: ${preferFoods}
-제외 음식: ${excludeFoods}
-예산: ${inputs.budget || '미정'}
-원하는 분위기: ${inputs.vibe || '미정'}
-이동 우선순위: ${inputs.movePriority || '미정'}
+[참여자 출발 위치]
+${locations}
 
-웹서치를 통해 실제 존재하는 서울 식당과 장소를 찾아서 추천해줘.
-네이버 지도, 카카오맵 기준으로 실제 평점이 높은 곳 위주로 추천해.
+[계산된 중간 지점]
+${midpointSection}
 
-각 지역마다 반드시 식당을 정확히 3개 추천해줘. restaurants 배열은 항상 length가 3이어야 해.
-regions 배열은 rank 1, rank 2 두 지역을 포함해야 해.
+[만남 조건]
+- 목적: ${inputs.purpose}
+- 선호 음식: ${preferFoods}
+- 제외 음식: ${excludeFoods}
+- 예산: ${inputs.budget || '미정'}
+- 분위기: ${inputs.vibe || '미정'}
+- 이동 우선순위: ${inputs.movePriority || '미정'}
 
-각 참여자별로 1순위 추천 지역까지의 예상 이동 시간(분)을 balances에 포함해줘.
-참여자 이름은 A, B, C, D, E, F 순서로 부여해.
+[중요 규칙]
+1. 참여자들의 실제 출발 위치를 분석해서 지리적 중간 지점 혹은 인기있는 지역을 추천해줘.
+   서울로 한정하지 말고 수원, 분당, 판교, 광교, 용인, 인천 등
+   실제 중간에 해당하는 지역도 적극 추천해줘.
+   예) 수원역 + 병점역 → 수원 행궁동, 광교, 영통 추천
 
-만남 적합도(matchScore)를 0~100 정수로 직접 계산해서 포함해줘.
-계산 기준:
-- 목적과 분위기 일치도: 40점
-- 예산 적합도: 30점
-- 지역 특성(교통, 분위기, 식당 밀집도 등): 30점
+2. 식당은 반드시 다음 기준으로 선정해줘:
+   - 네이버 플레이스 평점 4.0 이상
+   - 최근 6개월 내 인스타그램/SNS에서 언급된 핫플
+   - 웨이팅이 있을 정도로 인기 있는 곳 우선
+   - 각 지역당 반드시 정확히 3개 추천
 
-반드시 아래 JSON 형식으로만 응답해. 다른 텍스트는 넣지 마:
+3. 액티비티는 만남 목적에 따라 아래 기준으로 구체적으로 추천해줘:
+
+   [친목/동기모임/회식]
+   - 볼링장: 구체적인 장소명 (예: 강남 볼링클럽)
+   - 방탈출: 구체적인 테마명 (예: 홍대 넥스트에디션 '저택의 비밀')
+   - 노래방: 구체적인 장소명 (예: 코인노래방 싱싱)
+   - 다트바: 구체적인 장소명
+   - 보드게임카페: 구체적인 장소명
+
+   [소개팅/데이트]
+   - 감성 카페: 구체적인 카페명 + 대표 메뉴
+     (예: 성수 어니언 - 앤틱한 인테리어, 소금빵 유명)
+   - 전시/팝업: 현재 진행 중인 전시명
+     (예: 성수 무신사 팝업 '아디다스 오리지널스')
+   - 서점: 구체적인 서점명
+     (예: 을지로 최인아책방 - 독립서점, 분위기 좋음)
+   - 만화카페: 구체적인 장소명
+   - 루프탑 바: 구체적인 장소명 + 시그니처 칵테일
+
+   [스터디]
+   - 스터디카페: 구체적인 장소명 + 1인 가격
+   - 북카페: 구체적인 장소명
+   - 조용한 카페: 콘센트/와이파이 여부 포함
+
+   [비즈니스/선후배]
+   - 호텔 라운지: 구체적인 장소명
+   - 프라이빗 룸: 구체적인 식당명
+   - 조용한 카페: 구체적인 장소명
+
+   [청첩장모임]
+   - 프라이빗 카페: 구체적인 장소명
+   - 갤러리 카페: 구체적인 장소명
+   - 한옥 카페: 구체적인 장소명
+
+4. 액티비티 출력 형식은 반드시 이렇게 해줘:
+   뭉뚱그려서 "감성 카페 방문" 이렇게 쓰지 말고
+   반드시 아래처럼 구체적으로:
+   
+   ✅ 좋은 예시:
+   "성수 어니언 카페 - 앤틱한 공간, 소금빵·크루아상 유명. 
+    웨이팅 있으니 도착 전 웨이팅 앱 등록 추천"
+   
+   "홍대 넥스트에디션 방탈출 '저택의 비밀' - 
+    난이도 중상, 4인 기준 인당 25,000원, 예약 필수"
+   
+   ❌ 나쁜 예시:
+   "인근 카페에서 커피"
+   "노래방 방문"
+
+5. regions 배열은 rank 1, rank 2 두 지역을 포함해야 해.
+   각 region의 matchScore는 0~100 정수로 계산해줘.
+   계산 기준: 목적·분위기 일치도(40) + 예산 적합도(30) + 지역 특성(30)
+
+반드시 아래 JSON 형식으로만 응답해. 다른 텍스트 없이:
 {
   "regions": [
     {
       "rank": 1,
-      "name": "지역명 (예: 성수 / 서울숲)",
+      "name": "지역명",
       "reasons": ["이유1", "이유2", "이유3"],
+      "matchScore": 85,
       "restaurants": [
         {
           "id": "r1",
-          "name": "실제 식당명1",
+          "name": "실제 식당명",
           "emoji": "🍽️",
-          "tags": ["#태그1", "#태그2"],
+          "tags": ["#태그1", "#태그2", "#태그3"],
           "priceRange": "1인 20,000~35,000원",
-          "description": "추천 이유 한 줄"
+          "description": "네이버 평점 4.3 · 웨이팅 맛집 · 추천 이유",
+          "naverSearchQuery": "식당명 지역명"
         },
         {
           "id": "r2",
           "name": "실제 식당명2",
           "emoji": "🍜",
-          "tags": ["#태그1", "#태그2"],
+          "tags": ["#태그1", "#태그2", "#태그3"],
           "priceRange": "1인 15,000~25,000원",
-          "description": "추천 이유 한 줄"
+          "description": "네이버 평점 4.5 · 핫플 · 추천 이유",
+          "naverSearchQuery": "식당명2 지역명"
         },
         {
           "id": "r3",
           "name": "실제 식당명3",
           "emoji": "🥘",
-          "tags": ["#태그1", "#태그2"],
+          "tags": ["#태그1", "#태그2", "#태그3"],
           "priceRange": "1인 25,000~40,000원",
-          "description": "추천 이유 한 줄"
+          "description": "네이버 평점 4.2 · 웨이팅 맛집 · 추천 이유",
+          "naverSearchQuery": "식당명3 지역명"
         }
       ],
       "activities": [
-        { "label": "1차", "text": "설명", "color": "indigo" },
-        { "label": "2차", "text": "설명", "color": "green" },
-        { "label": "3차", "text": "설명", "color": "amber" }
+        {
+          "label": "1차",
+          "text": "식당 후보 중 선택",
+          "color": "indigo"
+        },
+        {
+          "label": "2차",
+          "text": "구체적인 장소명 - 상세 설명 (가격, 특징, 팁)",
+          "color": "green"
+        },
+        {
+          "label": "3차",
+          "text": "구체적인 장소명 - 상세 설명",
+          "color": "amber"
+        }
       ]
     },
-    { "rank": 2, "name": "...", "reasons": ["..."], "restaurants": [{ "id": "r4", "...": "..." }, { "id": "r5", "...": "..." }, { "id": "r6", "...": "..." }], "activities": [] }
+    {
+      "rank": 2,
+      "name": "지역명",
+      "reasons": ["이유1", "이유2", "이유3"],
+      "matchScore": 80,
+      "restaurants": [
+        { "id": "r4", "name": "...", "emoji": "🍽️", "tags": ["#태그"], "priceRange": "...", "description": "...", "naverSearchQuery": "..." },
+        { "id": "r5", "name": "...", "emoji": "🍜", "tags": ["#태그"], "priceRange": "...", "description": "...", "naverSearchQuery": "..." },
+        { "id": "r6", "name": "...", "emoji": "🥘", "tags": ["#태그"], "priceRange": "...", "description": "...", "naverSearchQuery": "..." }
+      ],
+      "activities": [
+        { "label": "1차", "text": "...", "color": "indigo" },
+        { "label": "2차", "text": "...", "color": "green" },
+        { "label": "3차", "text": "...", "color": "amber" }
+      ]
+    }
   ],
-  "balances": [
-    { "name": "A", "location": "출발지1", "minutes": 25 },
-    { "name": "B", "location": "출발지2", "minutes": 30 }
-  ],
-  "matchScore": 85,
-  "summary": "총평 한 문단"
+  "summary": "총평"
 }`
 }
 
@@ -162,9 +256,7 @@ function extractJson(text: string): ParsedAIResponse {
       typeof parsed !== 'object' ||
       parsed === null ||
       !('regions' in parsed) ||
-      !('summary' in parsed) ||
-      !('matchScore' in parsed) ||
-      !('balances' in parsed)
+      !('summary' in parsed)
     ) {
       throw new Error('Invalid AI response shape')
     }
@@ -217,37 +309,31 @@ function normalizeRegions(regions: ParsedRegion[]): RegionRecommendation[] {
         priceRange: restaurant.priceRange,
         description: restaurant.description,
         region: region.name,
+        naverSearchQuery: restaurant.naverSearchQuery,
       })),
     activities: region.activities ?? [],
   }))
 }
 
-function normalizeBalances(
-  balances: ParsedBalance[],
-  locations: string[],
-): MidpointResult['balances'] {
-  const avatarLetters = ['A', 'B', 'C', 'D', 'E', 'F']
-
-  if (!Array.isArray(balances) || balances.length === 0) {
-    throw new Error('이동 시간 데이터가 없습니다')
+function resolveMatchScore(parsed: ParsedAIResponse): number {
+  if (typeof parsed.matchScore === 'number') {
+    return normalizeMatchScore(parsed.matchScore)
   }
 
-  return locations.map((location, index) => {
-    const expectedName = avatarLetters[index] ?? `P${index + 1}`
-    const matched =
-      balances.find((balance) => balance.name === expectedName) ??
-      balances[index]
+  const regionScores = parsed.regions
+    .slice(0, REQUIRED_REGION_COUNT)
+    .map((region) => region.matchScore)
+    .filter((score): score is number => typeof score === 'number')
 
-    if (!matched || typeof matched.minutes !== 'number') {
-      throw new Error('이동 시간 데이터 형식이 올바르지 않습니다')
-    }
+  if (regionScores.length === 0) {
+    throw new Error('matchScore가 없습니다')
+  }
 
-    return {
-      name: expectedName,
-      location: matched.location || location,
-      minutes: Math.max(0, Math.round(matched.minutes)),
-    }
-  })
+  const average = Math.round(
+    regionScores.reduce((sum, score) => sum + score, 0) / regionScores.length,
+  )
+
+  return normalizeMatchScore(average)
 }
 
 function extractTextContent(data: OpenAIAPIResponse): string {
@@ -264,7 +350,7 @@ async function callOpenAIAPI(prompt: string, apiKey: string): Promise<string> {
     body: JSON.stringify({
       model: MODEL,
       messages: [{ role: 'user', content: prompt }],
-      max_tokens: 3000,
+      max_tokens: 4096,
     }),
   })
 
@@ -289,6 +375,7 @@ function delay(ms: number) {
 
 export async function getAIRecommendation(
   inputs: AIRecommendationInputs,
+  options?: GetAIRecommendationOptions,
 ): Promise<MidpointResult> {
   const apiKey = import.meta.env.VITE_OPENAI_API_KEY
 
@@ -296,11 +383,15 @@ export async function getAIRecommendation(
     throw new Error('VITE_OPENAI_API_KEY를 .env 파일에 설정해 주세요')
   }
 
-  const prompt = buildPrompt(inputs)
+  options?.onStatus?.('위치 분석 중...')
+  const locationAnalysis = await analyzeParticipantLocations(inputs.locations)
+
+  const prompt = buildPrompt(inputs, locationAnalysis.midpointRegionName)
   let lastError: Error | null = null
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     try {
+      options?.onStatus?.('AI 추천 생성 중...')
       const textContent = await callOpenAIAPI(prompt, apiKey)
       const parsed = extractJson(textContent)
       validateRestaurantCounts(parsed.regions)
@@ -310,11 +401,23 @@ export async function getAIRecommendation(
         throw new Error('추천 지역 데이터가 없습니다')
       }
 
-      const balances = normalizeBalances(parsed.balances, inputs.locations)
+      const destinationQuery =
+        regions[0]?.name ?? locationAnalysis.midpointRegionName ?? inputs.locations[0]
+
+      const travelResult = await calculateTravelBalances(
+        locationAnalysis.participants,
+        destinationQuery,
+        locationAnalysis.midpoint,
+      )
+
+      const balances = travelResult.usedKakao
+        ? travelResult.balances
+        : buildFallbackBalances(inputs.locations)
+
       const fairnessScore = calculateFairnessScore(
         balances.map((balance) => balance.minutes),
       )
-      const matchScore = normalizeMatchScore(parsed.matchScore)
+      const matchScore = resolveMatchScore(parsed)
 
       return {
         purpose: inputs.purpose,
@@ -326,6 +429,8 @@ export async function getAIRecommendation(
         matchScore,
         balances,
         summary: parsed.summary,
+        midpointRegionName: locationAnalysis.midpointRegionName ?? undefined,
+        balancesFromKakao: travelResult.usedKakao,
         shareId: nanoid(10),
         votes: {},
       }

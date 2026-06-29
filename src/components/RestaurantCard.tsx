@@ -94,7 +94,9 @@ export default function RestaurantCard({
 
         <div className="mt-auto flex shrink-0 justify-end pt-1">
           <a
-            href={getNaverPlaceSearchUrl(restaurant.name)}
+            href={getNaverPlaceSearchUrl(
+              restaurant.naverSearchQuery ?? restaurant.name,
+            )}
             target="_blank"
             rel="noopener noreferrer"
             onClick={handleNaverLinkClick}

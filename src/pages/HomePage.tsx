@@ -462,6 +462,7 @@ function CtaSection() {
   const setResult = useMidpointStore((s) => s.setResult)
 
   const [error, setError] = useState<string | null>(null)
+  const [loadingStatus, setLoadingStatus] = useState<string | null>(null)
 
   const disabled = !purpose || isLoading
 
@@ -478,31 +479,36 @@ function CtaSection() {
     }
 
     setError(null)
+    setLoadingStatus('위치 분석 중...')
     setLoading(true)
 
     try {
-      const result = await getAIRecommendation({
-        locations,
-        purpose,
-        preferFoods,
-        excludeFoods,
-        budget,
-        vibe,
-        movePriority,
-      })
+      const result = await getAIRecommendation(
+        {
+          locations,
+          purpose,
+          preferFoods,
+          excludeFoods,
+          budget,
+          vibe,
+          movePriority,
+        },
+        { onStatus: setLoadingStatus },
+      )
       setResult(result)
     } catch (err) {
       setError(
         err instanceof Error ? err.message : '추천을 가져오지 못했습니다',
       )
     } finally {
+      setLoadingStatus(null)
       setLoading(false)
     }
   }
 
   return (
     <>
-      <LoadingOverlay visible={isLoading} />
+      <LoadingOverlay visible={isLoading} statusMessage={loadingStatus} />
 
       <div className="sticky bottom-0 box-border w-full max-w-[100vw] border-t border-white/[0.06] bg-[#0F172A]/90 px-4 py-4 backdrop-blur-lg sm:px-6">
         {error ? (
