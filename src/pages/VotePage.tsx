@@ -4,11 +4,11 @@ import { useParams, useSearchParams } from 'react-router-dom'
 
 import RestaurantCard, { RestaurantCardGrid } from '../components/RestaurantCard'
 import { RESTAURANTS_PER_REGION } from '../lib/api'
+import { isFirebaseConfigured } from '../lib/firebase'
 import { applyVoteOgTags, parseVoteOgMetadata } from '../lib/og'
 import {
-  getStorageKey,
-  loadSharedResult,
-  saveSharedResult,
+  saveSharedVotes,
+  subscribeSharedResult,
 } from '../lib/share'
 import type { MidpointResult, Restaurant } from '../types'
 
@@ -205,6 +205,7 @@ export default function VotePage() {
   const [voterName, setVoterName] = useState('')
   const [nameInput, setNameInput] = useState('')
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [voteError, setVoteError] = useState<string | null>(null)
 
   useEffect(() => {
     if (!shareId) return
@@ -224,31 +225,33 @@ export default function VotePage() {
       return
     }
 
-    const loaded = loadSharedResult(shareId)
-    if (!loaded) {
-      setPhase('error')
+    if (!isFirebaseConfigured()) {
       setResult(null)
+      setPhase('error')
       return
     }
 
-    setResult(loaded)
-    setPhase('name')
-  }, [shareId])
+    setPhase('loading')
 
-  useEffect(() => {
-    if (!shareId) return
+    const unsubscribe = subscribeSharedResult(
+      shareId,
+      (loaded) => {
+        if (!loaded) {
+          setResult(null)
+          setPhase('error')
+          return
+        }
 
-    const storageKey = getStorageKey(shareId)
+        setResult(loaded)
+        setPhase((current) => (current === 'loading' ? 'name' : current))
+      },
+      () => {
+        setResult(null)
+        setPhase('error')
+      },
+    )
 
-    const handleStorage = (event: StorageEvent) => {
-      if (event.key !== storageKey) return
-
-      const loaded = loadSharedResult(shareId)
-      if (loaded) setResult(loaded)
-    }
-
-    window.addEventListener('storage', handleStorage)
-    return () => window.removeEventListener('storage', handleStorage)
+    return unsubscribe
   }, [shareId])
 
   const toggleSelection = (restaurantId: string) => {
@@ -270,7 +273,7 @@ export default function VotePage() {
     setPhase('voting')
   }
 
-  const handleSubmitVote = () => {
+  const handleSubmitVote = async () => {
     if (!result || !shareId || selectedIds.size === 0) return
 
     const updatedVotes = { ...result.votes }
@@ -282,10 +285,13 @@ export default function VotePage() {
       }
     }
 
-    const updatedResult: MidpointResult = { ...result, votes: updatedVotes }
-    saveSharedResult(shareId, updatedResult)
-    setResult(updatedResult)
-    setPhase('thanks')
+    try {
+      setVoteError(null)
+      await saveSharedVotes(shareId, updatedVotes)
+      setPhase('thanks')
+    } catch {
+      setVoteError('투표 저장에 실패했습니다. 다시 시도해 주세요.')
+    }
   }
 
   if (phase === 'loading') {
@@ -380,7 +386,11 @@ export default function VotePage() {
 
       {phase === 'voting' ? (
         <div className="fixed bottom-0 left-0 right-0 border-t border-white/[0.06] bg-[#0F172A]/90 px-4 py-4 backdrop-blur-lg">
-          <div className="mx-auto flex max-w-2xl items-center gap-3">
+          <div className="mx-auto flex max-w-2xl flex-col gap-2">
+            {voteError ? (
+              <p className="text-center text-sm text-red-400">{voteError}</p>
+            ) : null}
+            <div className="flex items-center gap-3">
             <p className="min-w-0 flex-1 text-sm text-slate-300">
               <span className="font-semibold text-indigo-400">
                 {selectedCount}개
@@ -395,6 +405,7 @@ export default function VotePage() {
             >
               투표 완료
             </button>
+            </div>
           </div>
         </div>
       ) : null}

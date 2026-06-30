@@ -224,13 +224,15 @@ export default function ResultSection() {
     setIsSharing(true)
 
     try {
-      const { url, updatedResult } = createShareLink(result)
+      const { url, updatedResult } = await createShareLink(result)
       setResult(updatedResult)
       await navigator.clipboard.writeText(url)
       setToastMessage('링크가 복사되었습니다! 친구들에게 공유해보세요 🎉')
       setToastVisible(true)
     } catch {
-      setToastMessage('링크 복사에 실패했습니다. 다시 시도해 주세요.')
+      setToastMessage(
+        '링크 복사에 실패했습니다. Firebase 설정을 확인하고 다시 시도해 주세요.',
+      )
       setToastVisible(true)
     } finally {
       setIsSharing(false)
@@ -243,7 +245,7 @@ export default function ResultSection() {
     setIsKakaoSharing(true)
 
     try {
-      const { url, updatedResult } = createShareLink(result)
+      const { url, updatedResult } = await createShareLink(result)
       setResult(updatedResult)
       await shareVoteLinkToKakao(url, updatedResult)
       setToastMessage('카카오톡 공유 창이 열렸어요!')
