@@ -29,8 +29,6 @@ function parseMidpointResult(value: unknown): MidpointResult | null {
     summary: data.summary ?? '',
     shareId: data.shareId ?? '',
     votes: data.votes ?? {},
-    midpointRegionName: data.midpointRegionName,
-    balancesFromKakao: data.balancesFromKakao,
   }
 }
 

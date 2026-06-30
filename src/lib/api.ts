@@ -2,10 +2,9 @@ import { nanoid } from 'nanoid'
 
 import {
   analyzeParticipantLocations,
-  buildFallbackBalances,
-  calculateTravelBalances,
-  type MidpointAnalysis,
-} from './kakaoMap'
+  buildEstimatedBalances,
+  type LocationAnalysis,
+} from './locationAnalysis'
 import { calculateFairnessScore, normalizeMatchScore } from './scores'
 import type { MidpointResult, RegionRecommendation } from '../types'
 
@@ -75,7 +74,7 @@ interface ParsedAIResponse {
   matchScore?: number
 }
 
-function formatLocationWeights(analysis: MidpointAnalysis): string {
+function formatLocationWeights(analysis: LocationAnalysis): string {
   if (analysis.locationWeights.length === 0) {
     return '정보 없음'
   }
@@ -87,7 +86,7 @@ function formatLocationWeights(analysis: MidpointAnalysis): string {
 
 function buildPrompt(
   inputs: AIRecommendationInputs,
-  locationAnalysis: MidpointAnalysis,
+  locationAnalysis: LocationAnalysis,
 ): string {
   const locations = inputs.locations.join(', ')
   const preferFoods =
@@ -95,14 +94,9 @@ function buildPrompt(
   const excludeFoods =
     inputs.excludeFoods.length > 0 ? inputs.excludeFoods.join(', ') : '없음'
   const participantDistribution = formatLocationWeights(locationAnalysis)
-  const midpointSection = locationAnalysis.midpointRegionName
-    ? `카카오 지도 API로 계산한 인원 가중 중간 지점 근처: ${locationAnalysis.midpointRegionName}
-가중 평균 공식: (각 위치 좌표 × 해당 위치 인원수) 합산 / 전체 인원 (${locationAnalysis.totalPeople}명)
-참여자 분포: ${participantDistribution}
-예) 강남 3명 + 수원 1명이면 강남 쪽에 더 가까운 지점을 기준으로 추천
-1순위 추천 지역은 이 가중 중간 지점과 다수 참여자 접근성을 우선 고려해줘.`
-    : `중간 지점 좌표 정보 없음 — 아래 참여자 분포(${participantDistribution})를 분석해
-인원이 많은 출발지 쪽과 지리적 중간을 함께 고려해 추천해줘.`
+  const midpointSection = `아래 참여자 분포(${participantDistribution})를 분석해
+인원이 많은 출발지 쪽과 지리적 중간을 함께 고려해 추천해줘.
+예) 강남 3명 + 수원 1명이면 강남 쪽에 더 가까운 지점을 기준으로 추천`
 
   return `너는 한국 최고의 모임 장소 큐레이터야.
 웹 검색으로 네이버 플레이스, 인스타그램 핫플, 망고플레이트 등
@@ -385,7 +379,7 @@ export async function getAIRecommendation(
   }
 
   options?.onStatus?.('위치 분석 중...')
-  const locationAnalysis = await analyzeParticipantLocations(inputs.locations)
+  const locationAnalysis = analyzeParticipantLocations(inputs.locations)
 
   const prompt = buildPrompt(inputs, locationAnalysis)
   let lastError: Error | null = null
@@ -402,18 +396,7 @@ export async function getAIRecommendation(
         throw new Error('추천 지역 데이터가 없습니다')
       }
 
-      const destinationQuery =
-        regions[0]?.name ?? locationAnalysis.midpointRegionName ?? inputs.locations[0]
-
-      const travelResult = await calculateTravelBalances(
-        locationAnalysis.participants,
-        destinationQuery,
-        locationAnalysis.midpoint,
-      )
-
-      const balances = travelResult.usedKakao
-        ? travelResult.balances
-        : buildFallbackBalances(inputs.locations)
+      const balances = buildEstimatedBalances(inputs.locations)
 
       const fairnessScore = calculateFairnessScore(
         balances.map((balance) => balance.minutes),
@@ -430,8 +413,6 @@ export async function getAIRecommendation(
         matchScore,
         balances,
         summary: parsed.summary,
-        midpointRegionName: locationAnalysis.midpointRegionName ?? undefined,
-        balancesFromKakao: travelResult.usedKakao,
         shareId: nanoid(10),
         votes: {},
       }

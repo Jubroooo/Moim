@@ -3,7 +3,6 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 
 import RestaurantCard, { RestaurantCardGrid } from './RestaurantCard'
 import { RESTAURANTS_PER_REGION } from '../lib/api'
-import { isKakaoShareAvailable, shareVoteLinkToKakao } from '../lib/kakaoShare'
 import { createShareLink } from '../lib/share'
 import { useMidpointStore } from '../store/useMidpointStore'
 import type { MidpointResult, RegionRecommendation } from '../types'
@@ -100,12 +99,8 @@ function RegionSection({ region }: { region: RegionRecommendation }) {
 
 function BalanceBarChart({
   balances,
-  fromKakao,
-  midpointRegionName,
 }: {
   balances: MidpointResult['balances']
-  fromKakao?: boolean
-  midpointRegionName?: string
 }) {
   const maxMinutes = Math.max(...balances.map((b) => b.minutes), 1)
 
@@ -113,16 +108,7 @@ function BalanceBarChart({
     <section className="box-border min-w-0 max-w-full rounded-2xl border border-white/[0.08] bg-white/[0.04] p-5 backdrop-blur-md sm:p-6">
       <div className="mb-4">
         <h3 className="text-lg font-semibold text-white">이동 시간 균형</h3>
-        <p className="mt-1 text-xs text-slate-400">
-          {fromKakao
-            ? '대중교통 기준 예상 소요 시간 (직선거리 × 1.4 ÷ 30km/h)'
-            : '예상 소요 시간 (추정치)'}
-        </p>
-        {midpointRegionName ? (
-          <p className="mt-1 text-xs text-emerald-400/80">
-            계산 기준 중간 지점: {midpointRegionName}
-          </p>
-        ) : null}
+        <p className="mt-1 text-xs text-slate-400">예상 소요 시간 (추정치)</p>
       </div>
 
       <div className="space-y-4">
@@ -209,8 +195,6 @@ export default function ResultSection() {
   const [toastVisible, setToastVisible] = useState(false)
   const [toastMessage, setToastMessage] = useState('')
   const [isSharing, setIsSharing] = useState(false)
-  const [isKakaoSharing, setIsKakaoSharing] = useState(false)
-  const kakaoShareEnabled = isKakaoShareAvailable()
 
   useEffect(() => {
     if (result && sectionRef.current) {
@@ -239,25 +223,6 @@ export default function ResultSection() {
     }
   }, [result, isSharing, setResult])
 
-  const handleKakaoShare = useCallback(async () => {
-    if (!result || isKakaoSharing) return
-
-    setIsKakaoSharing(true)
-
-    try {
-      const { url, updatedResult } = await createShareLink(result)
-      setResult(updatedResult)
-      await shareVoteLinkToKakao(url, updatedResult)
-      setToastMessage('카카오톡 공유 창이 열렸어요!')
-      setToastVisible(true)
-    } catch {
-      setToastMessage('카카오톡 공유에 실패했습니다. 다시 시도해 주세요.')
-      setToastVisible(true)
-    } finally {
-      setIsKakaoSharing(false)
-    }
-  }, [result, isKakaoSharing, setResult])
-
   const handleCloseToast = useCallback(() => setToastVisible(false), [])
 
   if (!result) return null
@@ -278,11 +243,7 @@ export default function ResultSection() {
           <RegionSection key={`${region.rank}-${region.name}`} region={region} />
         ))}
 
-        <BalanceBarChart
-          balances={result.balances}
-          fromKakao={result.balancesFromKakao}
-          midpointRegionName={result.midpointRegionName}
-        />
+        <BalanceBarChart balances={result.balances} />
 
         <blockquote className="relative rounded-2xl border border-indigo-500/20 bg-indigo-500/10 px-5 py-5 backdrop-blur-md sm:px-6">
           <span
@@ -311,17 +272,6 @@ export default function ResultSection() {
           >
             🔗 친구들에게 공유하기
           </button>
-
-          {kakaoShareEnabled ? (
-            <button
-              type="button"
-              onClick={handleKakaoShare}
-              disabled={isKakaoSharing}
-              className="w-full rounded-xl border border-[#FEE500]/30 bg-[#FEE500] py-3.5 text-sm font-semibold text-[#191919] transition hover:bg-[#FADA0A] disabled:opacity-60"
-            >
-              💬 카카오톡으로 공유하기
-            </button>
-          ) : null}
 
           <button
             type="button"
