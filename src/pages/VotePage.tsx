@@ -7,12 +7,15 @@ import { RESTAURANTS_PER_REGION } from '../lib/api'
 import { isFirebaseConfigured } from '../lib/firebase'
 import { applyVoteOgTags, parseVoteOgMetadata } from '../lib/og'
 import {
+  getStoredVoterName,
+  getUniqueVoterCount,
+  markAsVoted,
   saveSharedVotes,
   subscribeSharedResult,
 } from '../lib/share'
 import type { MidpointResult, Restaurant } from '../types'
 
-type PagePhase = 'loading' | 'error' | 'name' | 'voting' | 'thanks'
+type PagePhase = 'loading' | 'error' | 'name' | 'voting' | 'thanks' | 'already_voted'
 
 interface RegionGroup {
   label: string
@@ -34,8 +37,29 @@ function getVoteCount(result: MidpointResult, restaurantId: string): number {
   return result.votes[restaurantId]?.length ?? 0
 }
 
-function VoteResultsChart({ result }: { result: MidpointResult }) {
+function formatUpdatedAt(date: Date): string {
+  return date.toLocaleTimeString('ko-KR', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  })
+}
+
+function LiveVoteStatus({
+  result,
+  lastUpdatedAt,
+}: {
+  result: MidpointResult
+  lastUpdatedAt: Date | null
+}) {
   const restaurants = getAllRestaurants(result)
+  const uniqueVoters = getUniqueVoterCount(result.votes)
+  const expectedCount = result.peopleCount
+  const progressPercent =
+    expectedCount > 0
+      ? Math.min(100, Math.round((uniqueVoters / expectedCount) * 100))
+      : 0
+  const allVoted = expectedCount > 0 && uniqueVoters >= expectedCount
 
   const ranked = useMemo(() => {
     return [...restaurants]
@@ -53,7 +77,45 @@ function VoteResultsChart({ result }: { result: MidpointResult }) {
 
   return (
     <section className="rounded-2xl border border-white/[0.08] bg-white/[0.04] p-5 backdrop-blur-md sm:p-6">
-      <h2 className="mb-4 text-lg font-semibold text-white">현재까지 투표 결과</h2>
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <h2 className="text-lg font-semibold text-white">실시간 투표 현황</h2>
+          <p className="mt-1 text-sm text-slate-400">
+            현재{' '}
+            <span className="font-semibold text-emerald-400">{uniqueVoters}명</span>{' '}
+            투표 완료
+          </p>
+        </div>
+        {lastUpdatedAt ? (
+          <p className="text-xs text-slate-500">
+            마지막 업데이트 {formatUpdatedAt(lastUpdatedAt)}
+          </p>
+        ) : null}
+      </div>
+
+      {expectedCount > 0 ? (
+        <div className="mb-5 space-y-2">
+          <div className="flex items-center justify-between text-xs text-slate-400">
+            <span>투표 진행률</span>
+            <span>
+              {uniqueVoters}/{expectedCount}명
+            </span>
+          </div>
+          <div className="h-2 overflow-hidden rounded-full bg-white/[0.06]">
+            <motion.div
+              initial={{ width: 0 }}
+              animate={{ width: `${progressPercent}%` }}
+              transition={{ duration: 0.5, ease: 'easeOut' }}
+              className="h-full rounded-full bg-gradient-to-r from-emerald-600 to-emerald-400"
+            />
+          </div>
+          {allVoted ? (
+            <p className="text-sm font-medium text-emerald-400">
+              모든 참여자가 투표를 완료했어요!
+            </p>
+          ) : null}
+        </div>
+      ) : null}
 
       <div className="space-y-3">
         {ranked.map(({ restaurant, count }, index) => {
@@ -90,9 +152,9 @@ function VoteResultsChart({ result }: { result: MidpointResult }) {
 
               <div className="h-2 overflow-hidden rounded-full bg-white/[0.06]">
                 <motion.div
-                  initial={{ width: 0 }}
+                  initial={false}
                   animate={{ width: `${widthPercent}%` }}
-                  transition={{ duration: 0.5, delay: index * 0.05 }}
+                  transition={{ duration: 0.5, delay: index * 0.03 }}
                   className={`h-full rounded-full ${
                     isWinner
                       ? 'bg-gradient-to-r from-amber-500 to-amber-400'
@@ -112,10 +174,12 @@ function NameModal({
   name,
   onNameChange,
   onSubmit,
+  error,
 }: {
   name: string
   onNameChange: (value: string) => void
   onSubmit: () => void
+  error?: string | null
 }) {
   const trimmed = name.trim()
   const canSubmit = trimmed.length > 0 && trimmed.length <= 10
@@ -157,6 +221,8 @@ function NameModal({
           className="mt-4 w-full rounded-xl border border-white/[0.08] bg-white/[0.06] px-4 py-3 text-sm text-white placeholder:text-slate-500 outline-none transition focus:border-indigo-500/50 focus:ring-2 focus:ring-indigo-500/20"
           autoFocus
         />
+
+        {error ? <p className="mt-2 text-sm text-red-400">{error}</p> : null}
 
         <button
           type="button"
@@ -202,10 +268,17 @@ export default function VotePage() {
 
   const [phase, setPhase] = useState<PagePhase>('loading')
   const [result, setResult] = useState<MidpointResult | null>(null)
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<Date | null>(null)
   const [voterName, setVoterName] = useState('')
   const [nameInput, setNameInput] = useState('')
+  const [nameError, setNameError] = useState<string | null>(null)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [voteError, setVoteError] = useState<string | null>(null)
+
+  const uniqueVoters = useMemo(
+    () => (result ? getUniqueVoterCount(result.votes) : 0),
+    [result],
+  )
 
   useEffect(() => {
     if (!shareId) return
@@ -243,7 +316,18 @@ export default function VotePage() {
         }
 
         setResult(loaded)
-        setPhase((current) => (current === 'loading' ? 'name' : current))
+        setLastUpdatedAt(new Date())
+
+        setPhase((current) => {
+          if (current !== 'loading') return current
+
+          const storedName = getStoredVoterName(shareId)
+          if (storedName) {
+            setVoterName(storedName)
+            return 'already_voted'
+          }
+          return 'name'
+        })
       },
       () => {
         setResult(null)
@@ -267,14 +351,41 @@ export default function VotePage() {
   }
 
   const handleStartVoting = () => {
+    if (!shareId) return
+
     const trimmed = nameInput.trim()
     if (!trimmed || trimmed.length > 10) return
+
+    const storedName = getStoredVoterName(shareId)
+    if (storedName) {
+      if (storedName !== trimmed) {
+        setNameError(
+          `이 브라우저에서는 "${storedName}"님으로 이미 투표하셨어요.`,
+        )
+        return
+      }
+      setVoterName(storedName)
+      setPhase('already_voted')
+      return
+    }
+
+    setNameError(null)
     setVoterName(trimmed)
     setPhase('voting')
   }
 
   const handleSubmitVote = async () => {
     if (!result || !shareId || selectedIds.size === 0) return
+
+    const storedName = getStoredVoterName(shareId)
+    if (storedName && storedName !== voterName) {
+      setVoteError(`이 브라우저에서는 "${storedName}"님으로만 투표할 수 있어요.`)
+      return
+    }
+    if (storedName) {
+      setPhase('already_voted')
+      return
+    }
 
     const updatedVotes = { ...result.votes }
 
@@ -288,6 +399,7 @@ export default function VotePage() {
     try {
       setVoteError(null)
       await saveSharedVotes(shareId, updatedVotes)
+      markAsVoted(shareId, voterName)
       setPhase('thanks')
     } catch {
       setVoteError('투표 저장에 실패했습니다. 다시 시도해 주세요.')
@@ -308,16 +420,33 @@ export default function VotePage() {
 
   const regionGroups = getRegionGroups(result)
   const selectedCount = selectedIds.size
+  const expectedCount = result.peopleCount
+  const showAllVotedBanner =
+    expectedCount > 0 && uniqueVoters >= expectedCount
 
   return (
     <div className="min-h-screen w-full max-w-[100vw] overflow-x-hidden bg-[#0F172A]">
       <header className="border-b border-white/[0.06] px-4 py-5 sm:px-6">
-        <div className="mx-auto max-w-2xl">
+        <div className="mx-auto max-w-2xl space-y-1">
           <p className="text-sm text-slate-400">
             <span className="text-white">Moi</span>
             <span className="text-emerald-400">m</span>
             <span className="text-slate-500"> · 식당 투표</span>
           </p>
+          {expectedCount > 0 ? (
+            <p className="text-xs text-slate-400">
+              투표 현황:{' '}
+              <span className="font-semibold text-emerald-400">
+                {uniqueVoters}/{expectedCount}명
+              </span>{' '}
+              완료
+            </p>
+          ) : null}
+          {showAllVotedBanner ? (
+            <p className="text-xs font-medium text-emerald-400">
+              모든 참여자가 투표를 완료했어요!
+            </p>
+          ) : null}
         </div>
       </header>
 
@@ -334,10 +463,28 @@ export default function VotePage() {
                 🎉
               </p>
               <h1 className="mt-3 text-xl font-bold text-white">
-                투표해주셔서 감사해요! 🎉
+                투표해주셔서 감사해요!
               </h1>
               <p className="mt-2 text-sm text-slate-400">
-                모든 참여자가 투표하면 결과를 확인해보세요.
+                아래에서 실시간 투표 현황을 확인할 수 있어요.
+              </p>
+            </motion.div>
+          ) : phase === 'already_voted' ? (
+            <motion.div
+              key="already-voted"
+              initial={{ opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="rounded-2xl border border-white/[0.08] bg-white/[0.04] p-6 text-center backdrop-blur-md"
+            >
+              <p className="text-3xl" aria-hidden>
+                ✅
+              </p>
+              <h1 className="mt-3 text-xl font-bold text-white">
+                이미 투표하셨어요
+              </h1>
+              <p className="mt-2 text-sm text-slate-400">
+                {voterName ? `${voterName}님, ` : ''}
+                결과를 확인하세요. 이 브라우저에서는 재투표할 수 없어요.
               </p>
             </motion.div>
           ) : phase === 'voting' ? (
@@ -373,7 +520,7 @@ export default function VotePage() {
           ) : null}
         </AnimatePresence>
 
-        <VoteResultsChart result={result} />
+        <LiveVoteStatus result={result} lastUpdatedAt={lastUpdatedAt} />
       </main>
 
       {phase === 'name' ? (
@@ -381,6 +528,7 @@ export default function VotePage() {
           name={nameInput}
           onNameChange={setNameInput}
           onSubmit={handleStartVoting}
+          error={nameError}
         />
       ) : null}
 
@@ -391,20 +539,20 @@ export default function VotePage() {
               <p className="text-center text-sm text-red-400">{voteError}</p>
             ) : null}
             <div className="flex items-center gap-3">
-            <p className="min-w-0 flex-1 text-sm text-slate-300">
-              <span className="font-semibold text-indigo-400">
-                {selectedCount}개
-              </span>{' '}
-              선택됨
-            </p>
-            <button
-              type="button"
-              onClick={handleSubmitVote}
-              disabled={selectedCount === 0}
-              className="shrink-0 rounded-xl bg-gradient-to-r from-indigo-600 to-indigo-500 px-6 py-3 text-sm font-semibold text-white transition hover:from-indigo-500 hover:to-indigo-400 disabled:cursor-not-allowed disabled:from-slate-700 disabled:to-slate-700 disabled:text-slate-400"
-            >
-              투표 완료
-            </button>
+              <p className="min-w-0 flex-1 text-sm text-slate-300">
+                <span className="font-semibold text-indigo-400">
+                  {selectedCount}개
+                </span>{' '}
+                선택됨
+              </p>
+              <button
+                type="button"
+                onClick={handleSubmitVote}
+                disabled={selectedCount === 0}
+                className="shrink-0 rounded-xl bg-gradient-to-r from-indigo-600 to-indigo-500 px-6 py-3 text-sm font-semibold text-white transition hover:from-indigo-500 hover:to-indigo-400 disabled:cursor-not-allowed disabled:from-slate-700 disabled:to-slate-700 disabled:text-slate-400"
+              >
+                투표 완료
+              </button>
             </div>
           </div>
         </div>

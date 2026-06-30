@@ -105,3 +105,31 @@ export async function saveSharedVotes(
   const db = getFirebaseDb()
   await update(ref(db, getVoteRefPath(shareId)), { votes })
 }
+
+function getVotedStorageKey(shareId: string): string {
+  return `voted_${shareId}`
+}
+
+export function getStoredVoterName(shareId: string): string | null {
+  const name = localStorage.getItem(getVotedStorageKey(shareId))
+  return name?.trim() ? name.trim() : null
+}
+
+export function markAsVoted(shareId: string, voterName: string): void {
+  localStorage.setItem(getVotedStorageKey(shareId), voterName.trim())
+}
+
+export function getUniqueVoterCount(
+  votes: MidpointResult['votes'],
+): number {
+  const names = new Set<string>()
+
+  for (const voters of Object.values(votes)) {
+    for (const name of voters) {
+      const trimmed = name.trim()
+      if (trimmed) names.add(trimmed)
+    }
+  }
+
+  return names.size
+}
