@@ -11,6 +11,7 @@ export interface Restaurant {
   priceRange: string
   description: string
   region: string
+  address?: string
   naverSearchQuery?: string
 }
 
