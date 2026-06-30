@@ -111,6 +111,26 @@ export function buildNaverSearchQuery(name: string, address: string): string {
   return `${name.trim()} ${parts.slice(0, 2).join(' ')}`.trim()
 }
 
+export function cleanDescription(text: string): string {
+  // 마크다운 링크 제거: [텍스트](URL) → 텍스트만 남김
+  text = text.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+
+  // 단독 URL 제거: http:// 또는 https://로 시작하는 URL
+  text = text.replace(/https?:\/\/[^\s)]+/g, '')
+
+  // URL 인코딩된 문자열 제거 (%EA%B0 등)
+  text = text.replace(/%[0-9A-Fa-f]{2}/g, '')
+
+  // 빈 괄호 제거: () 또는 []
+  text = text.replace(/\(\s*\)/g, '')
+  text = text.replace(/\[\s*\]/g, '')
+
+  // 연속 공백 정리
+  text = text.replace(/\s+/g, ' ').trim()
+
+  return text
+}
+
 function buildPrompt(
   inputs: AIRecommendationInputs,
   attempt = 0,
@@ -135,6 +155,9 @@ function buildPrompt(
 4. 확실하지 않으면 차라리 후보 수를 줄여서라도
    실제 존재하는 곳만 답해.
 5. 각 식당마다 실제 주소(도로명 또는 동 단위)를 함께 제공해.
+6. description과 activities의 text 필드에는 URL, 마크다운 링크,
+   인코딩된 문자열을 절대 포함하지 마.
+   순수한 한국어 설명 텍스트만 작성해.
 
 [검색 조건]
 참여자 출발 위치: ${locations}
@@ -254,12 +277,19 @@ function sanitizeParsedRegions(regions: ParsedRegion[]): ParsedRegion[] {
         )
         continue
       }
-      validRestaurants.push(restaurant)
+      validRestaurants.push({
+        ...restaurant,
+        description: cleanDescription(restaurant.description ?? ''),
+      })
     }
 
     return {
       ...region,
       restaurants: validRestaurants,
+      activities: (region.activities ?? []).map((activity) => ({
+        ...activity,
+        text: cleanDescription(activity.text ?? ''),
+      })),
     }
   })
 }
@@ -299,7 +329,7 @@ function normalizeRegions(regions: ParsedRegion[]): RegionRecommendation[] {
           emoji: restaurant.emoji || '🍽️',
           tags: restaurant.tags ?? [],
           priceRange: restaurant.priceRange,
-          description: restaurant.description,
+          description: cleanDescription(restaurant.description ?? ''),
           region: region.name,
           address,
           naverSearchQuery,
@@ -307,7 +337,7 @@ function normalizeRegions(regions: ParsedRegion[]): RegionRecommendation[] {
       }),
     activities: (region.activities ?? []).map((activity, index) => ({
       label: activity.label,
-      text: activity.text,
+      text: cleanDescription(activity.text ?? ''),
       color: activity.color ?? ACTIVITY_COLORS[index] ?? 'indigo',
     })),
   }))
