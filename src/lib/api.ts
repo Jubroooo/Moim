@@ -1,6 +1,10 @@
 import { nanoid } from 'nanoid'
 
 import {
+  normalizeParsedActivity,
+  warnIfActivityLooksLikeRestaurant,
+} from './activityValidation'
+import {
   buildEstimatedBalances,
 } from './locationAnalysis'
 import { calculateFairnessScore, normalizeMatchScore } from './scores'
@@ -81,7 +85,7 @@ interface ParsedRegion {
   reasons: string[]
   matchScore?: number
   restaurants: ParsedRestaurant[]
-  activities: { label: string; text: string; color?: string }[]
+  activities: { label: string; text: string; type?: string; color?: string }[]
 }
 
 interface ParsedAIResponse {
@@ -175,8 +179,73 @@ function buildPrompt(
 3. 검색 결과에서 실제로 존재하고, 최근 운영 중인 것으로
    확인되는 식당만 선택해.
 4. 각 지역당 정확히 3개씩, 총 6개 식당을 선정해.
-5. 액티비티(2차, 3차)도 동일하게 실제 검색 기반으로
-   찾아서 추천해.
+5. 액티비티(2차, 3차)는 식당 검색과 별도로 웹 검색을 실행해
+   액티비티 장소만 찾아서 추천해.
+
+[액티비티 규칙 - 매우 중요]
+- 1차: 반드시 "위의 식당 후보 중 선택"으로 고정. 절대 변경 금지.
+- 2차: 반드시 식당이 아닌 액티비티 장소로 추천.
+  절대로 음식점, 식당, 맛집을 추천하지 마.
+  type 필드는 반드시 "activity"로 설정해.
+  아래 카테고리 중 만남 목적(${inputs.purpose})에 맞게 선택:
+
+  [친목/동기모임/회식]
+  → 노래방, 볼링장, 방탈출카페, 보드게임카페, 당구장, 다트바, 루프탑바, 펍/바
+
+  [소개팅/데이트]
+  → 감성 카페, 전시회/갤러리, 팝업스토어, 서점, 만화카페, 루프탑 카페, 공원 산책
+
+  [스터디]
+  → 스터디카페, 북카페, 도서관, 조용한 카페
+
+  [비즈니스/선후배]
+  → 호텔 라운지 카페, 조용한 프리미엄 카페
+
+  [청첩장모임]
+  → 프라이빗 카페, 갤러리 카페, 한옥 카페, 디저트 카페
+
+- 3차: 2차보다 더 가볍게 마무리할 수 있는 장소.
+  카페, 바, 편의점 포차, 야경 명소 등으로 추천.
+  절대로 식당 추천 금지. type 필드는 반드시 "activity"로 설정해.
+
+[액티비티 검색 규칙 - 매우 중요]
+2차/3차 장소를 추천할 때 반드시 아래 순서를 따라:
+
+1. 먼저 추천 지역명으로 웹서치 실행:
+   "{지역명} {액티비티 종류} 추천" 또는
+   "{지역명} 방탈출" / "{지역명} 감성카페" / "{지역명} 루프탑바"
+   형태로 실제 검색해서 결과를 확인해.
+
+2. 검색 결과에서 실제로 운영 중인 장소만 선택:
+   - 네이버 플레이스, 카카오맵, 인스타그램에서
+     최근 6개월 내 언급된 곳 우선
+   - 폐업했거나 정보가 불확실한 곳은 절대 포함 금지
+   - 확인되지 않은 장소는 차라리 빼고
+     확실한 것만 추천
+
+3. 방탈출이면:
+   - 업체명 + 테마명까지 구체적으로
+   - 예: "홍대 제로게임 방탈출 - '저택의 비밀' 테마"
+
+4. 카페면:
+   - 카페명 + 대표 메뉴 또는 특징
+   - 예: "성수 어니언 카페 - 소금빵, 앤틱 인테리어"
+
+5. 팝업/전시면:
+   - 현재 진행 중인 것인지 웹서치로 확인 후 추천
+   - 종료된 팝업은 절대 추천 금지
+   - 정기 전시 또는 상설 공간 위주로 추천
+
+6. 바/펍이면:
+   - 업체명 + 시그니처 메뉴 또는 분위기
+   - 예: "이태원 르챔버 - 스피크이지 바, 예약 필수"
+
+7. 출력 형식 (반드시 준수):
+   "실제 장소명 (서울 OO구 OO로 123) -
+    특징 한 줄, 가격 또는 예약 여부"
+
+   URL, 마크다운 링크, 인코딩 문자열 절대 포함 금지.
+   순수 텍스트만 작성.
 
 ${retryHint}
 
@@ -201,15 +270,17 @@ JSON으로만 응답:
       "activities": [
         {
           "label": "1차",
-          "text": "식당 후보 중 선택"
+          "text": "위의 식당 후보 중 선택"
         },
         {
           "label": "2차",
-          "text": "실제 장소명 + 주소 + 특징 (검색 기반)"
+          "type": "activity",
+          "text": "실제 장소명 (주소) - 특징 한 줄"
         },
         {
           "label": "3차",
-          "text": "실제 장소명 + 주소 + 특징 (검색 기반)"
+          "type": "activity",
+          "text": "실제 장소명 (주소) - 특징 한 줄"
         }
       ]
     },
@@ -223,9 +294,9 @@ JSON으로만 응답:
         { "id": "r6", "name": "...", "address": "...", "emoji": "🥘", "tags": ["#태그"], "priceRange": "...", "description": "..." }
       ],
       "activities": [
-        { "label": "1차", "text": "식당 후보 중 선택" },
-        { "label": "2차", "text": "실제 장소명 + 주소 + 특징 (검색 기반)" },
-        { "label": "3차", "text": "실제 장소명 + 주소 + 특징 (검색 기반)" }
+        { "label": "1차", "text": "위의 식당 후보 중 선택" },
+        { "label": "2차", "type": "activity", "text": "실제 장소명 (주소) - 특징 한 줄" },
+        { "label": "3차", "type": "activity", "text": "실제 장소명 (주소) - 특징 한 줄" }
       ]
     }
   ],
@@ -286,10 +357,17 @@ function sanitizeParsedRegions(regions: ParsedRegion[]): ParsedRegion[] {
     return {
       ...region,
       restaurants: validRestaurants,
-      activities: (region.activities ?? []).map((activity) => ({
-        ...activity,
-        text: cleanDescription(activity.text ?? ''),
-      })),
+      activities: (region.activities ?? []).map((activity) => {
+        const normalized = normalizeParsedActivity({
+          ...activity,
+          text:
+            activity.label === '1차'
+              ? '위의 식당 후보 중 선택'
+              : cleanDescription(activity.text ?? ''),
+        })
+        warnIfActivityLooksLikeRestaurant(normalized, region.name)
+        return normalized
+      }),
     }
   })
 }
@@ -337,7 +415,8 @@ function normalizeRegions(regions: ParsedRegion[]): RegionRecommendation[] {
       }),
     activities: (region.activities ?? []).map((activity, index) => ({
       label: activity.label,
-      text: cleanDescription(activity.text ?? ''),
+      text: activity.text,
+      type: activity.type,
       color: activity.color ?? ACTIVITY_COLORS[index] ?? 'indigo',
     })),
   }))

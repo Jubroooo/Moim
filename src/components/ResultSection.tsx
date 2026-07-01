@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 
 import RestaurantCard, { RestaurantCardGrid } from './RestaurantCard'
 import { RESTAURANTS_PER_REGION } from '../lib/api'
+import { shouldShowActivityRestaurantWarning } from '../lib/activityValidation'
 import { createShareLink } from '../lib/share'
 import { useMidpointStore } from '../store/useMidpointStore'
 import type { MidpointResult, RegionRecommendation } from '../types'
@@ -78,7 +79,19 @@ function RegionSection({ region }: { region: RegionRecommendation }) {
           <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
             추천 코스
           </p>
-          {region.activities.map((activity) => (
+          {region.activities.map((activity) => {
+            const showRestaurantWarning = shouldShowActivityRestaurantWarning(
+              activity,
+            )
+
+            if (showRestaurantWarning) {
+              console.warn(
+                `[Moim] UI: ${region.name} ${activity.label} 액티비티에 식당 관련 내용 감지:`,
+                activity.text,
+              )
+            }
+
+            return (
             <div key={`${activity.label}-${activity.text}`} className="flex items-start gap-3">
               <span
                 className={`shrink-0 rounded-md px-2 py-0.5 text-xs font-semibold ring-1 ${
@@ -88,9 +101,17 @@ function RegionSection({ region }: { region: RegionRecommendation }) {
               >
                 {activity.label}
               </span>
-              <p className="text-sm text-slate-300">{activity.text}</p>
+              <div className="min-w-0 flex-1 space-y-1">
+                <p className="text-sm text-slate-300">{activity.text}</p>
+                {showRestaurantWarning ? (
+                  <p className="text-xs font-medium text-amber-400">
+                    ⚠ 식당으로 추천된 것 같아요. 액티비티 장소인지 확인해 주세요.
+                  </p>
+                ) : null}
+              </div>
             </div>
-          ))}
+            )
+          })}
         </div>
       ) : null}
     </section>

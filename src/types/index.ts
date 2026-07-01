@@ -20,7 +20,7 @@ export interface RegionRecommendation {
   name: string
   reasons: string[]
   restaurants: Restaurant[]
-  activities: { label: string; text: string; color: string }[]
+  activities: { label: string; text: string; color: string; type?: string }[]
 }
 
 export interface MidpointResult {
